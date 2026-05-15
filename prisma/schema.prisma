@@ -1,0 +1,238 @@
+// AI Customer Support Platform - Database Schema
+// Using SQLite via Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      String   @default("agent") // super_admin, admin, agent, viewer
+  avatar    String?
+  status    String   @default("offline") // online, offline, away, busy
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignedConversations Conversation[]     @relation("AssignedAgent")
+  sentMessages          Message[]          @relation("MessageSender")
+  uploadedDocuments     Document[]         @relation("DocumentUploader")
+  notifications         Notification[]     @relation("UserNotifications")
+  assignments           Assignment[]       @relation("AssignedUser")
+}
+
+// ============================================
+// CHANNELS
+// ============================================
+
+model Channel {
+  id        String   @id @default(cuid())
+  type      String   // facebook, whatsapp, website
+  name      String
+  config    String   @default("{}") // JSON config for channel (page ID, phone, etc.)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversations Conversation[]
+}
+
+// ============================================
+// CUSTOMERS
+// ============================================
+
+model Customer {
+  id            String   @id @default(cuid())
+  name          String
+  email         String?
+  phone         String?
+  facebookId    String?
+  whatsappPhone String?
+  avatar        String?
+  leadStatus    String   @default("new") // new, contacted, qualified, proposal, negotiation, won, lost
+  sentiment     String   @default("neutral") // positive, neutral, negative
+  notes         String   @default("")
+  lastActivity  DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  conversations Conversation[]
+  tags          CustomerTag[]
+}
+
+model CustomerTag {
+  id         String   @id @default(cuid())
+  name       String
+  color      String   @default("#6B7280")
+  customerId String
+  createdAt  DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// CONVERSATIONS
+// ============================================
+
+model Conversation {
+  id             String    @id @default(cuid())
+  customerId     String
+  channelId      String
+  assignedToId   String?
+  status         String    @default("active") // active, pending, closed, archived
+  aiMode         String    @default("suggest") // auto, suggest, human
+  priority       String    @default("normal") // low, normal, high, urgent
+  subject        String?
+  unreadCount    Int       @default(0)
+  isPinned       Boolean   @default(false)
+  lastMessageAt  DateTime  @default(now())
+  lastMessage    String?
+  closedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  customer   Customer     @relation(fields: [customerId], references: [id])
+  channel    Channel      @relation(fields: [channelId], references: [id])
+  assignedTo User?        @relation("AssignedAgent", fields: [assignedToId], references: [id])
+  messages   Message[]
+  assignments Assignment[]
+  aiLogs     AiLog[]
+}
+
+// ============================================
+// MESSAGES
+// ============================================
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  senderType     String   // customer, agent, ai, system
+  senderId       String?
+  content        String
+  contentType    String   @default("text") // text, image, file, emoji, voice, note
+  metadata       String   @default("{}") // JSON metadata
+  isRead         Boolean  @default(false)
+  isInternal     Boolean  @default(false) // internal staff notes
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User?        @relation("MessageSender", fields: [senderId], references: [id])
+}
+
+// ============================================
+// ASSIGNMENTS
+// ============================================
+
+model Assignment {
+  id             String   @id @default(cuid())
+  conversationId String
+  agentId        String
+  assignedBy     String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agent        User         @relation("AssignedUser", fields: [agentId], references: [id])
+}
+
+// ============================================
+// AI SYSTEM
+// ============================================
+
+model AiLog {
+  id             String   @id @default(cuid())
+  conversationId String
+  messageId      String?
+  prompt         String
+  response       String
+  tokens         Int      @default(0)
+  model          String   @default("gpt-4")
+  responseTime   Int      @default(0) // ms
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// KNOWLEDGE BASE
+// ============================================
+
+model Document {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // pdf, docx, txt, url, faq
+  content     String   // extracted text content
+  summary     String?
+  uploadedById String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  uploadedBy User @relation("DocumentUploader", fields: [uploadedById], references: [id])
+}
+
+model Faq {
+  id        String   @id @default(cuid())
+  question  String
+  answer    String
+  category  String   @default("general")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// AUTOMATION
+// ============================================
+
+model AutomationRule {
+  id        String   @id @default(cuid())
+  name      String
+  trigger   String   // new_conversation, keyword_match, sentiment_change, inactivity
+  conditions String  @default("{}") // JSON conditions
+  actions   String   @default("{}") // JSON actions
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // message, assignment, mention, system
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  user User @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// SETTINGS
+// ============================================
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @default("")
+  category  String   @default("general") // general, ai, channels, branding, widget
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
