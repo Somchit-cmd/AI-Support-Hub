@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { generateAIResponse } from '@/lib/ai'
+import { generateAIResponse, getKnowledgeContext, getAISettings } from '@/lib/ai'
 
 export async function POST(
   request: Request,
@@ -44,23 +44,25 @@ export async function POST(
       content: m.content,
     }))
 
-    // Load knowledge base context
-    const [documents, faqs] = await Promise.all([
-      db.document.findMany({ where: { isActive: true }, take: 5 }),
-      db.faq.findMany({ where: { isActive: true }, take: 10 }),
-    ])
+    // Load AI settings from database
+    const aiSettings = await getAISettings()
 
-    const knowledgeContext = [
-      ...documents.map((d) => `[Document: ${d.name}]\n${d.content.substring(0, 500)}`),
-      ...faqs.map((f) => `[FAQ] Q: ${f.question}\nA: ${f.answer}`),
-    ].join('\n\n')
+    // Get the last customer message for smarter RAG retrieval
+    const lastCustomerMessage = conversation.messages
+      .filter((m) => m.senderType === 'customer')
+      .pop()?.content || ''
 
-    // Call AI service
+    // Load knowledge base context using the smarter RAG function
+    const knowledgeContext = await getKnowledgeContext(lastCustomerMessage)
+
+    // Call AI service with settings from database
     const aiResponse = await generateAIResponse({
       messages: recentMessages,
       customerName: conversation.customer.name,
       knowledgeContext,
       conversationHistory,
+      temperature: aiSettings.aiTemperature,
+      maxTokens: aiSettings.aiMaxTokens,
     })
 
     // Save AI message

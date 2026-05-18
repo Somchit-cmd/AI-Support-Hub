@@ -126,3 +126,37 @@ Stage Summary:
 - Production-ready connection dialogs with step-by-step setup guides
 - Outbound messaging APIs for both channels
 - Lint passes cleanly, app running on port 3000
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Enhance AI settings page and AI backend with RAG configuration
+
+Work Log:
+- Updated src/lib/ai.ts with new functions:
+  - getAISettings(): Loads ai_mode, ai_personality, ai_system_prompt, ai_temperature, ai_max_tokens, rag_enabled, rag_max_documents, rag_max_faqs from DB
+  - getKnowledgeContext(customerMessage): Smarter RAG retrieval with keyword matching for FAQs and documents, respects rag_max_documents/rag_max_faqs limits
+  - testAIWithRAG(message): Simulates a customer message and returns AI response + knowledge context + metrics
+  - Updated generateAIResponse() to accept optional temperature and maxTokens parameters
+- Updated src/app/api/conversations/[id]/ai-reply/route.ts to use getKnowledgeContext() and getAISettings() instead of loading all docs/FAQs directly
+- Created src/app/api/ai/test/route.ts: POST endpoint that accepts test message and returns AI response, knowledge context, model, tokens, response time
+- Created src/app/api/ai/stats/route.ts: GET endpoint returning document/FAQ counts (active/inactive), total knowledge chars, model name, AI settings
+- Enhanced SettingsPage.tsx AI tab with 5 comprehensive cards:
+  - Card 1: AI Model Information (model name badge, temperature slider, max tokens input)
+  - Card 2: Default AI Mode (response mode + personality selector)
+  - Card 3: RAG Knowledge Base (enable/disable toggle, max docs/FAQs sliders, stats row)
+  - Card 4: Custom System Prompt (larger textarea, reset to default button, character count)
+  - Card 5: AI Test Panel (message input, test button, response display, metrics, collapsible knowledge context)
+- Added new state variables: aiTemperature, aiMaxTokens, ragEnabled, ragMaxDocuments, ragMaxFaqs, aiStats, testMessage, testResponse, testKnowledgeContext, testTokens, testResponseTime, isTestLoading, showKnowledgeContext
+- Updated fetchSettings to load new AI/RAG settings
+- Updated handleSaveAll to save all new settings
+- Added fetchAIStats and handleTestAI functions
+- All existing code (Facebook/WhatsApp dialogs, channels tab, general tab, widget tab) preserved
+- Lint passes cleanly
+
+Stage Summary:
+- AI backend now uses DB settings for temperature, max tokens, RAG configuration
+- Smarter RAG retrieval with keyword matching instead of loading all docs/FAQs
+- New /api/ai/test and /api/ai/stats endpoints
+- Comprehensive AI settings UI with model info, RAG config, and live testing
+- App running on port 3000

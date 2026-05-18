@@ -15,11 +15,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { Slider } from '@/components/ui/slider'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Bot, Globe, MessageCircle, Phone, Palette, Clock,
   Save, Sparkles, CheckCircle2, XCircle, ExternalLink,
-  Copy, Check, ChevronDown, ChevronRight, AlertCircle, Shield, Key
+  Copy, Check, ChevronDown, ChevronRight, AlertCircle, Shield, Key,
+  Send, Loader2, BookOpen, FileText, RotateCcw, Database, Thermometer, Zap
 } from 'lucide-react'
 
 interface SettingItem {
@@ -619,9 +621,32 @@ export default function SettingsPage() {
   const [businessHoursEnd, setBusinessHoursEnd] = useState('18:00')
   const [autoCloseHours, setAutoCloseHours] = useState('24')
 
+  // AI & RAG form state
+  const [aiTemperature, setAiTemperature] = useState(0.7)
+  const [aiMaxTokens, setAiMaxTokens] = useState(2048)
+  const [ragEnabled, setRagEnabled] = useState(true)
+  const [ragMaxDocuments, setRagMaxDocuments] = useState(5)
+  const [ragMaxFaqs, setRagMaxFaqs] = useState(10)
+  const [aiStats, setAiStats] = useState<{
+    documents: { active: number; inactive: number; total: number }
+    faqs: { active: number; inactive: number; total: number }
+    totalKnowledgeChars: number
+    model: string
+  } | null>(null)
+
+  // AI Test state
+  const [testMessage, setTestMessage] = useState('')
+  const [testResponse, setTestResponse] = useState('')
+  const [testKnowledgeContext, setTestKnowledgeContext] = useState('')
+  const [testTokens, setTestTokens] = useState(0)
+  const [testResponseTime, setTestResponseTime] = useState(0)
+  const [isTestLoading, setIsTestLoading] = useState(false)
+  const [showKnowledgeContext, setShowKnowledgeContext] = useState(false)
+
   useEffect(() => {
     fetchSettings()
     fetchChannels()
+    fetchAIStats()
   }, [])
 
   const fetchSettings = async () => {
@@ -644,6 +669,11 @@ export default function SettingsPage() {
         setBusinessHoursStart(get('business_hours_start') || '09:00')
         setBusinessHoursEnd(get('business_hours_end') || '18:00')
         setAutoCloseHours(get('auto_close_inactive_hours') || '24')
+        setAiTemperature(Number(get('ai_temperature')) || 0.7)
+        setAiMaxTokens(Number(get('ai_max_tokens')) || 2048)
+        setRagEnabled(get('rag_enabled') !== 'false')
+        setRagMaxDocuments(Number(get('rag_max_documents')) || 5)
+        setRagMaxFaqs(Number(get('rag_max_faqs')) || 10)
       }
     } catch { /* error */ } finally {
       setIsLoading(false)
@@ -656,6 +686,16 @@ export default function SettingsPage() {
       if (res.ok) {
         const data = await res.json()
         setChannels(data.channels || [])
+      }
+    } catch { /* error */ }
+  }
+
+  const fetchAIStats = async () => {
+    try {
+      const res = await fetch('/api/ai/stats')
+      if (res.ok) {
+        const data = await res.json()
+        setAiStats(data)
       }
     } catch { /* error */ }
   }
@@ -679,6 +719,11 @@ export default function SettingsPage() {
       { key: 'ai_mode', value: aiMode },
       { key: 'ai_personality', value: aiPersonality },
       { key: 'ai_system_prompt', value: aiSystemPrompt },
+      { key: 'ai_temperature', value: String(aiTemperature) },
+      { key: 'ai_max_tokens', value: String(aiMaxTokens) },
+      { key: 'rag_enabled', value: String(ragEnabled) },
+      { key: 'rag_max_documents', value: String(ragMaxDocuments) },
+      { key: 'rag_max_faqs', value: String(ragMaxFaqs) },
       { key: 'widget_primary_color', value: widgetColor },
       { key: 'widget_welcome_message', value: widgetWelcome },
       { key: 'widget_position', value: widgetPosition },
@@ -687,6 +732,35 @@ export default function SettingsPage() {
       { key: 'business_hours_end', value: businessHoursEnd },
       { key: 'auto_close_inactive_hours', value: autoCloseHours },
     ])
+  }
+
+  const handleTestAI = async () => {
+    if (!testMessage.trim()) return
+    setIsTestLoading(true)
+    setTestResponse('')
+    setTestKnowledgeContext('')
+    setTestTokens(0)
+    setTestResponseTime(0)
+    try {
+      const res = await fetch('/api/ai/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: testMessage }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setTestResponse(data.response)
+        setTestKnowledgeContext(data.knowledgeContext)
+        setTestTokens(data.tokens)
+        setTestResponseTime(data.responseTime)
+      } else {
+        setTestResponse('Error: Failed to get AI response. Please try again.')
+      }
+    } catch {
+      setTestResponse('Error: Network error. Please try again.')
+    } finally {
+      setIsTestLoading(false)
+    }
   }
 
   const copyToClipboard = (text: string) => {
@@ -951,11 +1025,79 @@ export default function SettingsPage() {
 
           {/* AI Settings */}
           <TabsContent value="ai" className="space-y-4 mt-4">
+            {/* Card 1: AI Model Information */}
             <Card className="border-0 shadow-sm">
-              <CardHeader><CardTitle className="text-sm">AI Configuration</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Bot className="h-4 w-4" /> AI Model Information
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-lg bg-slate-900 flex items-center justify-center">
+                      <Sparkles className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold">{aiStats?.model || 'z-ai-web-dev-sdk'}</p>
+                      <p className="text-xs text-muted-foreground">Current AI Model</p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] h-6">
+                    <Zap className="h-3 w-3 mr-1" /> Powered by z-ai-web-dev-sdk
+                  </Badge>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm flex items-center gap-1.5">
+                        <Thermometer className="h-3.5 w-3.5" /> Temperature
+                      </Label>
+                      <span className="text-sm font-mono text-muted-foreground">{aiTemperature.toFixed(1)}</span>
+                    </div>
+                    <Slider
+                      value={[aiTemperature]}
+                      onValueChange={(v) => setAiTemperature(v[0])}
+                      min={0}
+                      max={1}
+                      step={0.1}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Lower = more focused, Higher = more creative
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm flex items-center gap-1.5">
+                      <Zap className="h-3.5 w-3.5" /> Max Tokens
+                    </Label>
+                    <Input
+                      type="number"
+                      value={aiMaxTokens}
+                      onChange={(e) => setAiMaxTokens(Number(e.target.value) || 2048)}
+                      min={256}
+                      max={8192}
+                      placeholder="2048"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Maximum length of AI response (256 - 8192)
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Card 2: Default AI Mode */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <MessageCircle className="h-4 w-4" /> Default AI Mode
+                </CardTitle>
+              </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Default AI Mode</Label>
+                  <Label>Response Mode</Label>
                   <Select value={aiMode} onValueChange={setAiMode}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -964,6 +1106,9 @@ export default function SettingsPage() {
                       <SelectItem value="human">👤 Human - No AI responses</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Controls how AI interacts with customers across all conversations
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>AI Personality</Label>
@@ -976,17 +1121,233 @@ export default function SettingsPage() {
                       <SelectItem value="formal">Formal</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Sets the tone and style of AI responses
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  <Label>Custom System Prompt</Label>
-                  <Textarea
-                    value={aiSystemPrompt}
-                    onChange={(e) => setAiSystemPrompt(e.target.value)}
-                    placeholder="Override the default AI system prompt with custom instructions..."
-                    className="min-h-[120px]"
+              </CardContent>
+            </Card>
+
+            {/* Card 3: RAG Knowledge Base Configuration */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Database className="h-4 w-4" /> RAG Knowledge Base
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-3 rounded-lg border">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm">RAG Enabled</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Use knowledge base to enhance AI responses
+                    </p>
+                  </div>
+                  <Switch
+                    checked={ragEnabled}
+                    onCheckedChange={setRagEnabled}
                   />
-                  <p className="text-xs text-muted-foreground">Leave empty to use the default prompt</p>
                 </div>
+
+                {ragEnabled && (
+                  <>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm flex items-center gap-1.5">
+                          <FileText className="h-3.5 w-3.5" /> Max Documents
+                        </Label>
+                        <span className="text-sm font-mono text-muted-foreground">{ragMaxDocuments}</span>
+                      </div>
+                      <Slider
+                        value={[ragMaxDocuments]}
+                        onValueChange={(v) => setRagMaxDocuments(v[0])}
+                        min={1}
+                        max={20}
+                        step={1}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Maximum documents included in AI context (1-20)
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm flex items-center gap-1.5">
+                          <BookOpen className="h-3.5 w-3.5" /> Max FAQs
+                        </Label>
+                        <span className="text-sm font-mono text-muted-foreground">{ragMaxFaqs}</span>
+                      </div>
+                      <Slider
+                        value={[ragMaxFaqs]}
+                        onValueChange={(v) => setRagMaxFaqs(v[0])}
+                        min={1}
+                        max={30}
+                        step={1}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Maximum FAQs included in AI context (1-30)
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {/* Knowledge Base Stats */}
+                <div className="grid grid-cols-3 gap-3 p-3 bg-slate-50 rounded-lg">
+                  <div className="text-center">
+                    <p className="text-lg font-bold">{aiStats?.documents?.total ?? '-'}</p>
+                    <p className="text-xs text-muted-foreground">Documents</p>
+                    {aiStats && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {aiStats.documents.active} active / {aiStats.documents.inactive} inactive
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold">{aiStats?.faqs?.total ?? '-'}</p>
+                    <p className="text-xs text-muted-foreground">FAQs</p>
+                    {aiStats && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {aiStats.faqs.active} active / {aiStats.faqs.inactive} inactive
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold">
+                      {aiStats?.totalKnowledgeChars != null
+                        ? aiStats.totalKnowledgeChars > 1000
+                          ? `${(aiStats.totalKnowledgeChars / 1000).toFixed(1)}k`
+                          : aiStats.totalKnowledgeChars
+                        : '-'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Total Chars</p>
+                    <p className="text-[10px] text-muted-foreground">in active items</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Card 4: Custom System Prompt */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" /> Custom System Prompt
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Textarea
+                  value={aiSystemPrompt}
+                  onChange={(e) => setAiSystemPrompt(e.target.value)}
+                  placeholder="Override the default AI system prompt with custom instructions. Leave empty to use the default prompt which includes multilingual support (English, Thai, Lao) and professional customer support guidelines..."
+                  className="min-h-[160px] font-mono text-sm"
+                />
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    {aiSystemPrompt.length > 0
+                      ? `${aiSystemPrompt.length} characters`
+                      : 'Using default prompt'}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setAiSystemPrompt('')}
+                    disabled={aiSystemPrompt.length === 0}
+                    className="h-7 text-xs"
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" /> Reset to Default
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Card 5: AI Test Panel */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Send className="h-4 w-4" /> AI Test Panel
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-sm">Test Message</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={testMessage}
+                      onChange={(e) => setTestMessage(e.target.value)}
+                      placeholder="Type a customer message to test AI response..."
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && testMessage.trim()) {
+                          e.preventDefault()
+                          handleTestAI()
+                        }
+                      }}
+                    />
+                    <Button
+                      onClick={handleTestAI}
+                      disabled={isTestLoading || !testMessage.trim()}
+                      className="bg-slate-900 hover:bg-slate-800 shrink-0"
+                    >
+                      {isTestLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Test Results */}
+                {testResponse && (
+                  <div className="space-y-3">
+                    <div className="p-4 bg-slate-50 rounded-lg space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">AI Response</p>
+                      <p className="text-sm whitespace-pre-wrap">{testResponse}</p>
+                    </div>
+
+                    {/* Metrics */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="p-2 bg-slate-50 rounded text-center">
+                        <p className="text-xs text-muted-foreground">Tokens</p>
+                        <p className="text-sm font-semibold">{testTokens}</p>
+                      </div>
+                      <div className="p-2 bg-slate-50 rounded text-center">
+                        <p className="text-xs text-muted-foreground">Response Time</p>
+                        <p className="text-sm font-semibold">{testResponseTime}ms</p>
+                      </div>
+                      <div className="p-2 bg-slate-50 rounded text-center">
+                        <p className="text-xs text-muted-foreground">Context Used</p>
+                        <p className="text-sm font-semibold">{testKnowledgeContext ? 'Yes' : 'None'}</p>
+                      </div>
+                    </div>
+
+                    {/* Knowledge Context (collapsible) */}
+                    {testKnowledgeContext && (
+                      <div className="border rounded-lg overflow-hidden">
+                        <button
+                          className="w-full flex items-center justify-between p-3 text-sm hover:bg-slate-50 transition-colors"
+                          onClick={() => setShowKnowledgeContext(!showKnowledgeContext)}
+                        >
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <BookOpen className="h-3.5 w-3.5" /> Knowledge Context Used
+                          </span>
+                          {showKnowledgeContext ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </button>
+                        {showKnowledgeContext && (
+                          <ScrollArea className="max-h-48 border-t">
+                            <div className="p-3">
+                              <pre className="text-xs whitespace-pre-wrap text-muted-foreground font-mono">
+                                {testKnowledgeContext}
+                              </pre>
+                            </div>
+                          </ScrollArea>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
