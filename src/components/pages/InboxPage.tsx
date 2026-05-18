@@ -229,30 +229,45 @@ function ChatWindowPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false)
 
-  useEffect(() => {
-    const conv = conversations.find(c => c.id === selectedConversationId)
-    setConversation(conv || null)
-    setMessages(conv?.messages || [])
-  }, [conversations, selectedConversationId])
-
-  useEffect(() => {
-    if (selectedConversationId) {
-      fetchMessages(selectedConversationId)
-    }
-  }, [selectedConversationId])
-
-  const fetchMessages = async (convId: string) => {
+  const fetchMessages = useCallback(async (convId: string) => {
+    setIsLoadingMessages(true)
     try {
       const res = await fetch(`/api/conversations/${convId}`)
       if (res.ok) {
         const data = await res.json()
-        setMessages(data.messages || [])
+        // API returns { conversation: { messages: [...], customer: {}, channel: {}, ... } }
+        const conv = data.conversation
+        if (conv) {
+          setMessages(conv.messages || [])
+          // Also update the local conversation state with full detail (customer, channel, etc.)
+          setConversation((prev) => prev ? { ...prev, ...conv } : prev)
+        }
       }
     } catch {
       // silently fail
+    } finally {
+      setIsLoadingMessages(false)
     }
-  }
+  }, [])
+
+  // Keep conversation object in sync with store (for metadata like status, aiMode, etc.)
+  // BUT do NOT reset messages from here — messages come from fetchMessages API only
+  useEffect(() => {
+    const conv = conversations.find(c => c.id === selectedConversationId)
+    setConversation(conv || null)
+  }, [conversations, selectedConversationId])
+
+  // Fetch messages when conversation is selected
+  useEffect(() => {
+    if (selectedConversationId) {
+      setMessages([]) // clear old messages immediately so stale data isn't shown
+      fetchMessages(selectedConversationId)
+    } else {
+      setMessages([])
+    }
+  }, [selectedConversationId, fetchMessages])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -452,9 +467,25 @@ function ChatWindowPanel() {
         {/* Messages Area */}
         <ScrollArea className="flex-1 px-4 py-4">
           <div className="max-w-3xl mx-auto space-y-3">
-            {messages.map((msg, i) => (
-              <MessageBubble key={msg.id} message={msg} isLast={i === messages.length - 1} />
-            ))}
+            {isLoadingMessages && messages.length === 0 ? (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className={cn('flex items-start gap-2', i % 2 === 0 ? '' : 'flex-row-reverse')}>
+                    <Skeleton className="h-8 w-8 rounded-full shrink-0" />
+                    <div className="space-y-2">
+                      <Skeleton className="h-3 w-16" />
+                      <Skeleton className={cn('h-12 rounded-2xl', i % 2 === 0 ? 'w-64' : 'w-48')} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                {messages.map((msg, i) => (
+                  <MessageBubble key={msg.id} message={msg} isLast={i === messages.length - 1} />
+                ))}
+              </>
+            )}
             {isAiTyping && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
