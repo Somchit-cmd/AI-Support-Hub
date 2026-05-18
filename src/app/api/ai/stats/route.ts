@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getAISettings } from '@/lib/ai'
 import { AI_PROVIDERS, getAIProviderConfig } from '@/lib/ai-providers'
+import { getUsageStats, getBudgetStatus } from '@/lib/ai-usage'
 
 export async function GET() {
   try {
@@ -34,6 +35,29 @@ export async function GET() {
     const providerConfig = await getAIProviderConfig()
     const providerInfo = AI_PROVIDERS[providerConfig.provider]
 
+    // Get comprehensive usage stats
+    const [todayStats, weekStats, monthStats, budgetStatus] = await Promise.all([
+      getUsageStats('today'),
+      getUsageStats('7d'),
+      getUsageStats('30d'),
+      getBudgetStatus(),
+    ])
+
+    // Get recent AI logs for activity display
+    const recentLogs = await db.aiLog.findMany({
+      take: 10,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        model: true,
+        provider: true,
+        tokens: true,
+        estimatedCost: true,
+        responseTime: true,
+        createdAt: true,
+      },
+    }).catch(() => [])
+
     return NextResponse.json({
       documents: {
         active: activeDocs,
@@ -50,6 +74,14 @@ export async function GET() {
       provider: providerConfig.provider,
       providerName: providerInfo?.name || providerConfig.provider,
       settings: aiSettings,
+      // Usage tracking data
+      usage: {
+        today: todayStats,
+        week: weekStats,
+        month: monthStats,
+      },
+      budget: budgetStatus,
+      recentLogs,
     })
   } catch (error) {
     console.error('[AI Stats] Error:', error)

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { generateAIResponse, getKnowledgeContext, getAISettings } from '@/lib/ai'
+import { recordUsage, calculateCost } from '@/lib/ai-usage'
 
 export async function POST(
   request: Request,
@@ -79,7 +80,12 @@ export async function POST(
       },
     })
 
-    // Save AI log
+    // Estimate prompt/completion tokens split
+    const promptTokens = Math.round(aiResponse.tokens * 0.6)
+    const completionTokens = aiResponse.tokens - promptTokens
+    const estimatedCost = calculateCost(aiResponse.provider, aiResponse.model, promptTokens, completionTokens)
+
+    // Save AI log with enhanced tracking
     const aiLog = await db.aiLog.create({
       data: {
         conversationId: id,
@@ -87,9 +93,23 @@ export async function POST(
         prompt: conversationHistory.slice(-1000),
         response: aiResponse.content,
         tokens: aiResponse.tokens,
+        promptTokens,
+        completionTokens,
         model: aiResponse.model,
+        provider: aiResponse.provider,
         responseTime: aiResponse.responseTime,
+        estimatedCost,
       },
+    })
+
+    // Record usage for daily aggregation and budget tracking
+    await recordUsage({
+      provider: aiResponse.provider,
+      model: aiResponse.model,
+      promptTokens,
+      completionTokens,
+      totalTokens: aiResponse.tokens,
+      responseTime: aiResponse.responseTime,
     })
 
     // Update conversation

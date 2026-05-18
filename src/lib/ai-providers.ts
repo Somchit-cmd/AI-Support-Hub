@@ -5,13 +5,14 @@
 import ZAI from 'z-ai-web-dev-sdk'
 import OpenAI from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import Anthropic, { TextBlock } from '@anthropic-ai/sdk'
 import { db } from '@/lib/db'
 
 // ============================================
 // TYPES
 // ============================================
 
-export type AIProviderType = 'z-ai' | 'openai' | 'google' | 'custom'
+export type AIProviderType = 'z-ai' | 'openai' | 'google' | 'anthropic' | 'custom'
 
 export interface AIProviderConfig {
   provider: AIProviderType
@@ -99,6 +100,23 @@ export const AI_PROVIDERS: Record<AIProviderType, AIProviderInfo> = {
     apiKeyLabel: 'Google AI API Key',
     apiKeyPlaceholder: 'AIzaSyxxxxxxxxxxxxxxxxxxxxxxx',
     docsUrl: 'https://aistudio.google.com/apikey',
+  },
+  'anthropic': {
+    id: 'anthropic',
+    name: 'Anthropic (Claude)',
+    description: 'Use Claude 3.5 Sonnet, Haiku, and Opus models. Requires an API key from console.anthropic.com.',
+    icon: 'Brain',
+    defaultModel: 'claude-3-5-sonnet-20241022',
+    availableModels: [
+      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Recommended)' },
+      { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku (Fast)' },
+      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus (Advanced)' },
+    ],
+    requiresApiKey: true,
+    requiresBaseUrl: false,
+    apiKeyLabel: 'Anthropic API Key',
+    apiKeyPlaceholder: 'sk-ant-xxxxxxxxxxxxxxxx',
+    docsUrl: 'https://console.anthropic.com/settings/keys',
   },
   'custom': {
     id: 'custom',
@@ -324,6 +342,61 @@ async function generateWithGoogle(
 }
 
 // ============================================
+// ANTHROPIC (CLAUDE) PROVIDER
+// ============================================
+
+async function generateWithAnthropic(
+  messages: { role: string; content: string }[],
+  config: AIProviderConfig,
+  temperature?: number,
+  maxTokens?: number,
+): Promise<AIProviderResponse> {
+  const startTime = Date.now()
+
+  const anthropic = new Anthropic({ apiKey: config.apiKey })
+
+  // First "assistant" message in our format is the system prompt
+  let systemPrompt = ''
+  const conversationMessages: { role: 'user' | 'assistant'; content: string }[] = []
+
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && conversationMessages.length === 0 && !systemPrompt) {
+      systemPrompt = msg.content
+    } else if (msg.role === 'user') {
+      conversationMessages.push({ role: 'user', content: msg.content })
+    } else if (msg.role === 'assistant') {
+      conversationMessages.push({ role: 'assistant', content: msg.content })
+    }
+  }
+
+  // Anthropic requires at least one user message
+  if (conversationMessages.length === 0) {
+    conversationMessages.push({ role: 'user', content: 'Hello' })
+  }
+
+  const completion = await anthropic.messages.create({
+    model: config.model,
+    max_tokens: maxTokens ?? 2048,
+    system: systemPrompt || undefined,
+    messages: conversationMessages,
+    temperature: temperature ?? 0.7,
+  })
+
+  const textContent = completion.content
+    .filter((block): block is TextBlock => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+
+  return {
+    content: textContent || 'No response generated.',
+    tokens: (completion.usage.input_tokens || 0) + (completion.usage.output_tokens || 0),
+    model: completion.model || config.model,
+    provider: 'anthropic',
+    responseTime: Date.now() - startTime,
+  }
+}
+
+// ============================================
 // CUSTOM PROVIDER (OpenAI-compatible)
 // ============================================
 
@@ -384,6 +457,10 @@ export async function generateWithProvider(
     case 'google':
       if (!config.apiKey) throw new Error('Google AI API key is required. Configure it in Settings > AI.')
       return generateWithGoogle(messages, config, temperature, maxTokens)
+
+    case 'anthropic':
+      if (!config.apiKey) throw new Error('Anthropic API key is required. Configure it in Settings > AI.')
+      return generateWithAnthropic(messages, config, temperature, maxTokens)
 
     case 'custom':
       if (!config.baseUrl) throw new Error('Custom provider requires a base URL. Configure it in Settings > AI.')
@@ -451,6 +528,30 @@ export async function testProviderConnection(config: AIProviderConfig): Promise<
           tokens: (response.response.usageMetadata?.promptTokenCount || 0) + (response.response.usageMetadata?.candidatesTokenCount || 0),
           model: config.model,
           provider: 'google',
+          responseTime: Date.now() - startTime,
+        }
+        break
+      }
+
+      case 'anthropic': {
+        if (!config.apiKey) {
+          return { success: false, message: 'Anthropic API key is required.' }
+        }
+        const anthropic = new Anthropic({ apiKey: config.apiKey })
+        const response = await anthropic.messages.create({
+          model: config.model,
+          max_tokens: 50,
+          messages: [{ role: 'user', content: 'Respond with exactly: "Connection successful!"' }],
+        })
+        const text = response.content
+          .filter((block): block is TextBlock => block.type === 'text')
+          .map((block) => block.text)
+          .join('')
+        result = {
+          content: text,
+          tokens: (response.usage.input_tokens || 0) + (response.usage.output_tokens || 0),
+          model: response.model || config.model,
+          provider: 'anthropic',
           responseTime: Date.now() - startTime,
         }
         break

@@ -22,7 +22,8 @@ import {
   Save, Sparkles, CheckCircle2, XCircle, ExternalLink,
   Copy, Check, ChevronDown, ChevronRight, AlertCircle, Shield, Key,
   Send, Loader2, BookOpen, FileText, RotateCcw, Database, Thermometer, Zap,
-  Settings, Eye, EyeOff, Plug, Cpu
+  Settings, Eye, EyeOff, Plug, Cpu, Brain, TrendingUp, DollarSign, Activity,
+  BarChart3, AlertTriangle
 } from 'lucide-react'
 
 interface SettingItem {
@@ -635,7 +636,58 @@ export default function SettingsPage() {
     model: string
     provider?: string
     providerName?: string
+    usage?: {
+      today: {
+        totalTokens: number
+        promptTokens: number
+        completionTokens: number
+        totalRequests: number
+        estimatedCost: number
+        avgResponseTime: number
+        byProvider: { provider: string; totalRequests: number; totalTokens: number; estimatedCost: number }[]
+        daily: { date: string; totalRequests: number; totalTokens: number; estimatedCost: number }[]
+      }
+      week: {
+        totalTokens: number
+        promptTokens: number
+        completionTokens: number
+        totalRequests: number
+        estimatedCost: number
+        avgResponseTime: number
+        byProvider: { provider: string; totalRequests: number; totalTokens: number; estimatedCost: number }[]
+        daily: { date: string; totalRequests: number; totalTokens: number; estimatedCost: number }[]
+      }
+      month: {
+        totalTokens: number
+        promptTokens: number
+        completionTokens: number
+        totalRequests: number
+        estimatedCost: number
+        avgResponseTime: number
+        byProvider: { provider: string; totalRequests: number; totalTokens: number; estimatedCost: number }[]
+        daily: { date: string; totalRequests: number; totalTokens: number; estimatedCost: number }[]
+      }
+    }
+    budget?: {
+      monthlyBudget: number
+      monthlyUsage: number
+      remainingBudget: number
+      percentageUsed: number
+      warningLevel: 'green' | 'yellow' | 'red'
+    }
+    recentLogs?: {
+      id: string
+      model: string
+      provider: string
+      tokens: number
+      estimatedCost: number
+      responseTime: number
+      createdAt: string
+    }[]
   } | null>(null)
+
+  // Monthly budget setting
+  const [aiMonthlyBudget, setAiMonthlyBudget] = useState('0')
 
   // AI Provider form state
   const [aiProvider, setAiProvider] = useState<string>('z-ai')
@@ -680,6 +732,18 @@ export default function SettingsPage() {
       requiresApiKey: true, requiresBaseUrl: false,
       apiKeyLabel: 'Google AI API Key', apiKeyPlaceholder: 'AIzaSyxxxxxxxxxxxxxxx',
       docsUrl: 'https://aistudio.google.com/apikey',
+    },
+    {
+      id: 'anthropic', name: 'Anthropic (Claude)', icon: Brain, color: 'violet',
+      description: 'Claude 3.5 Sonnet, Haiku, and Opus models.',
+      models: [
+        { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Recommended)' },
+        { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku (Fast)' },
+        { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus (Advanced)' },
+      ],
+      requiresApiKey: true, requiresBaseUrl: false,
+      apiKeyLabel: 'Anthropic API Key', apiKeyPlaceholder: 'sk-ant-xxxxxxxxxxxxxxxx',
+      docsUrl: 'https://console.anthropic.com/settings/keys',
     },
     {
       id: 'custom', name: 'Custom Provider', icon: Settings, color: 'orange',
@@ -737,6 +801,7 @@ export default function SettingsPage() {
         setAiProviderApiKey(get('ai_provider_api_key'))
         setAiProviderModel(get('ai_provider_model') || 'default')
         setAiProviderBaseUrl(get('ai_provider_base_url'))
+        setAiMonthlyBudget(get('ai_monthly_budget') || '0')
       }
     } catch { /* error */ } finally {
       setIsLoading(false)
@@ -791,6 +856,7 @@ export default function SettingsPage() {
       { key: 'ai_provider_api_key', value: aiProviderApiKey },
       { key: 'ai_provider_model', value: aiProviderModel },
       { key: 'ai_provider_base_url', value: aiProviderBaseUrl },
+      { key: 'ai_monthly_budget', value: aiMonthlyBudget },
       { key: 'widget_primary_color', value: widgetColor },
       { key: 'widget_welcome_message', value: widgetWelcome },
       { key: 'widget_position', value: widgetPosition },
@@ -862,6 +928,13 @@ export default function SettingsPage() {
     navigator.clipboard.writeText(text)
     setWebhookUrlCopied(true)
     setTimeout(() => setWebhookUrlCopied(false), 2000)
+  }
+
+  // Format tokens for display (e.g., 1500 -> 1.5k, 1000000 -> 1M)
+  const formatTokens = (tokens: number): string => {
+    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+    if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`
+    return String(tokens)
   }
 
   const facebookChannel = channels.find(c => c.type === 'facebook')
@@ -1136,6 +1209,7 @@ export default function SettingsPage() {
                       {aiProvider === 'openai' && <Bot className="h-5 w-5 text-white" />}
                       {aiProvider === 'google' && <Globe className="h-5 w-5 text-white" />}
                       {aiProvider === 'custom' && <Settings className="h-5 w-5 text-white" />}
+                      {aiProvider === 'anthropic' && <Brain className="h-5 w-5 text-white" />}
                     </div>
                     <div>
                       <p className="text-sm font-semibold">{currentProvider?.name || 'Z-AI'}</p>
@@ -1150,7 +1224,7 @@ export default function SettingsPage() {
                 {/* Provider Selection Grid */}
                 <div className="space-y-2">
                   <Label className="text-sm">Select AI Provider</Label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {PROVIDERS.map((provider) => {
                       const Icon = provider.icon
                       const isSelected = aiProvider === provider.id
@@ -1651,9 +1725,249 @@ export default function SettingsPage() {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
 
-          {/* Widget Settings */}
+            {/* Card 6: Token Usage & Budget Dashboard */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" /> Token Usage & Budget
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {/* Budget Progress Bar */}
+                {aiStats?.budget && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Monthly Budget</span>
+                      <span className="text-sm text-muted-foreground">
+                        {aiStats.budget.monthlyBudget === 0 ? 'Unlimited' : `$${aiStats.budget.monthlyBudget.toFixed(2)}`}
+                      </span>
+                    </div>
+                    {aiStats.budget.monthlyBudget > 0 && (
+                      <>
+                        <div className="relative h-3 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={cn(
+                              'h-full rounded-full transition-all duration-500',
+                              aiStats.budget.warningLevel === 'red' ? 'bg-red-500' :
+                              aiStats.budget.warningLevel === 'yellow' ? 'bg-amber-500' :
+                              'bg-emerald-500'
+                            )}
+                            style={{ width: `${Math.min(aiStats.budget.percentageUsed, 100)}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className={cn(
+                            'font-medium',
+                            aiStats.budget.warningLevel === 'red' ? 'text-red-600' :
+                            aiStats.budget.warningLevel === 'yellow' ? 'text-amber-600' :
+                            'text-emerald-600'
+                          )}>
+                            ${aiStats.budget.monthlyUsage.toFixed(4)} used ({aiStats.budget.percentageUsed.toFixed(1)}%)
+                          </span>
+                          <span className="text-muted-foreground">
+                            {aiStats.budget.remainingBudget === -1 ? 'Unlimited' : `$${aiStats.budget.remainingBudget.toFixed(2)} remaining`}
+                          </span>
+                        </div>
+                        {aiStats.budget.warningLevel === 'red' && (
+                          <div className="flex items-center gap-2 p-2 bg-red-50 rounded-lg border border-red-200">
+                            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+                            <span className="text-xs text-red-700">
+                              {aiStats.budget.percentageUsed >= 100
+                                ? 'Monthly budget exceeded! AI features may be limited.'
+                                : 'Approaching budget limit. Consider increasing your budget.'}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <div className="space-y-2">
+                      <Label className="text-sm">Monthly Budget (USD)</Label>
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                        <Input
+                          type="number"
+                          value={aiMonthlyBudget}
+                          onChange={(e) => setAiMonthlyBudget(e.target.value)}
+                          placeholder="0 = unlimited"
+                          min={0}
+                          step={1}
+                          className="flex-1"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Set to 0 for unlimited. Budget is tracked monthly and resets automatically.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <Separator />
+
+                {/* Usage Stats Cards */}
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Today */}
+                  <div className="p-3 bg-slate-50 rounded-lg space-y-1">
+                    <p className="text-xs text-muted-foreground font-medium">Today</p>
+                    <p className="text-lg font-bold">{formatTokens(aiStats?.usage?.today?.totalTokens ?? 0)}</p>
+                    <p className="text-xs text-muted-foreground">{aiStats?.usage?.today?.totalRequests ?? 0} requests</p>
+                    <p className="text-xs font-medium text-emerald-600">${(aiStats?.usage?.today?.estimatedCost ?? 0).toFixed(4)}</p>
+                  </div>
+                  {/* This Week */}
+                  <div className="p-3 bg-slate-50 rounded-lg space-y-1">
+                    <p className="text-xs text-muted-foreground font-medium">7 Days</p>
+                    <p className="text-lg font-bold">{formatTokens(aiStats?.usage?.week?.totalTokens ?? 0)}</p>
+                    <p className="text-xs text-muted-foreground">{aiStats?.usage?.week?.totalRequests ?? 0} requests</p>
+                    <p className="text-xs font-medium text-emerald-600">${(aiStats?.usage?.week?.estimatedCost ?? 0).toFixed(4)}</p>
+                  </div>
+                  {/* This Month */}
+                  <div className="p-3 bg-slate-50 rounded-lg space-y-1">
+                    <p className="text-xs text-muted-foreground font-medium">30 Days</p>
+                    <p className="text-lg font-bold">{formatTokens(aiStats?.usage?.month?.totalTokens ?? 0)}</p>
+                    <p className="text-xs text-muted-foreground">{aiStats?.usage?.month?.totalRequests ?? 0} requests</p>
+                    <p className="text-xs font-medium text-emerald-600">${(aiStats?.usage?.month?.estimatedCost ?? 0).toFixed(4)}</p>
+                  </div>
+                </div>
+
+                {/* Token Breakdown */}
+                {aiStats?.usage?.month && aiStats.usage.month.totalTokens > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Token Breakdown (30 days)</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
+                        <div className="h-2.5 w-2.5 rounded-full bg-blue-500" />
+                        <div className="flex-1">
+                          <p className="text-xs text-muted-foreground">Input (Prompt)</p>
+                          <p className="text-sm font-semibold">{formatTokens(aiStats.usage.month.promptTokens)}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 p-2 bg-violet-50 rounded-lg">
+                        <div className="h-2.5 w-2.5 rounded-full bg-violet-500" />
+                        <div className="flex-1">
+                          <p className="text-xs text-muted-foreground">Output (Completion)</p>
+                          <p className="text-sm font-semibold">{formatTokens(aiStats.usage.month.completionTokens)}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
+                      <Activity className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Avg Response Time:</span>
+                      <span className="text-sm font-semibold">{aiStats.usage.month.avgResponseTime}ms</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Usage by Provider */}
+                {aiStats?.usage?.month && aiStats.usage.month.byProvider.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Usage by Provider (30 days)</p>
+                    <div className="space-y-2">
+                      {aiStats.usage.month.byProvider.map((p) => {
+                        const providerInfo = PROVIDERS.find(prov => prov.id === p.provider)
+                        const Icon = providerInfo?.icon || Settings
+                        return (
+                          <div key={p.provider} className="flex items-center gap-3 p-2 bg-slate-50 rounded-lg">
+                            <div className="h-7 w-7 rounded bg-slate-200 flex items-center justify-center shrink-0">
+                              <Icon className="h-3.5 w-3.5 text-slate-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-medium">{providerInfo?.name || p.provider}</p>
+                                <p className="text-xs font-semibold">{formatTokens(p.totalTokens)}</p>
+                              </div>
+                              <div className="flex items-center justify-between mt-0.5">
+                                <p className="text-[10px] text-muted-foreground">{p.totalRequests} requests</p>
+                                <p className="text-[10px] text-emerald-600">${p.estimatedCost.toFixed(4)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 30-Day Usage Chart (Simple bar chart) */}
+                {aiStats?.usage?.month && aiStats.usage.month.daily.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium flex items-center gap-1.5">
+                      <TrendingUp className="h-3.5 w-3.5" /> 30-Day Usage Trend
+                    </p>
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <div className="flex items-end gap-[2px] h-24">
+                        {aiStats.usage.month.daily.map((day, i) => {
+                          const maxTokens = Math.max(...aiStats.usage.month!.daily.map(d => d.totalTokens), 1)
+                          const height = maxTokens > 0 ? (day.totalTokens / maxTokens) * 100 : 0
+                          return (
+                            <div
+                              key={day.date}
+                              className="flex-1 min-w-[3px] group relative"
+                              style={{ height: '100%' }}
+                            >
+                              <div
+                                className={cn(
+                                  'w-full rounded-t transition-all duration-200',
+                                  i === aiStats.usage.month!.daily.length - 1
+                                    ? 'bg-slate-900'
+                                    : 'bg-slate-300 hover:bg-slate-400'
+                                )}
+                                style={{
+                                  height: `${Math.max(height, 2)}%`,
+                                  marginTop: `${100 - Math.max(height, 2)}%`,
+                                }}
+                              />
+                              {/* Tooltip */}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10">
+                                <div className="bg-slate-900 text-white text-[10px] px-2 py-1 rounded shadow-lg whitespace-nowrap">
+                                  {day.date.slice(5)}: {formatTokens(day.totalTokens)}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div className="flex justify-between mt-1.5 text-[10px] text-muted-foreground">
+                        <span>30 days ago</span>
+                        <span>Today</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent AI Activity */}
+                {aiStats?.recentLogs && aiStats.recentLogs.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Recent AI Activity</p>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                      {aiStats.recentLogs.map((log) => (
+                        <div key={log.id} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg text-xs">
+                          <div className="h-5 w-5 rounded bg-slate-200 flex items-center justify-center shrink-0">
+                            <Bot className="h-3 w-3 text-slate-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium">{log.model}</span>
+                            <span className="text-muted-foreground ml-1">({log.provider})</span>
+                          </div>
+                          <span className="text-muted-foreground shrink-0">{formatTokens(log.tokens)}</span>
+                          <span className="text-emerald-600 shrink-0">${log.estimatedCost.toFixed(4)}</span>
+                          <span className="text-muted-foreground shrink-0">{log.responseTime}ms</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* No Usage Message */}
+                {(!aiStats?.usage?.month || aiStats.usage.month.totalTokens === 0) && (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <BarChart3 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No AI usage data yet</p>
+                    <p className="text-xs mt-1">Usage statistics will appear here once AI responses are generated</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
           <TabsContent value="widget" className="space-y-4 mt-4">
             <Card className="border-0 shadow-sm">
               <CardHeader><CardTitle className="text-sm">Widget Customization</CardTitle></CardHeader>
