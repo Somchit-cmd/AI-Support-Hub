@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,9 +15,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
-  Settings, Bot, Globe, MessageCircle, Phone, Palette, Clock,
-  Save, Languages, Key, Sparkles, Monitor
+  Bot, Globe, MessageCircle, Phone, Palette, Clock,
+  Save, Sparkles, CheckCircle2, XCircle, ExternalLink,
+  Copy, Check, ChevronDown, ChevronRight, AlertCircle, Shield, Key
 } from 'lucide-react'
 
 interface SettingItem {
@@ -27,10 +29,582 @@ interface SettingItem {
   category: string
 }
 
+interface ChannelData {
+  id: string
+  type: string
+  name: string
+  config: string
+  isActive: boolean
+}
+
+// ===================== FACEBOOK CONNECT DIALOG =====================
+
+function FacebookConnectDialog({
+  open,
+  onClose,
+  channel,
+  onConnected,
+}: {
+  open: boolean
+  onClose: () => void
+  channel: ChannelData | null
+  onConnected: () => void
+}) {
+  const [step, setStep] = useState(1)
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [formData, setFormData] = useState({
+    pageId: '',
+    pageName: '',
+    pageAccessToken: '',
+    appId: '',
+    appSecret: '',
+    verifyToken: 'ai_support_hub_verify_token',
+  })
+
+  // Load existing config
+  useEffect(() => {
+    if (channel && open) {
+      try {
+        const config = JSON.parse(channel.config)
+        setFormData({
+          pageId: config.pageId || '',
+          pageName: config.pageName || '',
+          pageAccessToken: config.pageAccessToken || '',
+          appId: config.appId || '',
+          appSecret: config.appSecret || '',
+          verifyToken: config.verifyToken || 'ai_support_hub_verify_token',
+        })
+      } catch { /* ignore */ }
+    }
+  }, [channel, open])
+
+  const handleConnect = async () => {
+    setIsConnecting(true)
+    setResult(null)
+    try {
+      const res = await fetch('/api/channels/facebook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      })
+      const data = await res.json()
+      setResult({
+        success: data.isValid,
+        message: data.message,
+      })
+      if (data.isValid) {
+        onConnected()
+      }
+    } catch {
+      setResult({ success: false, message: 'Connection failed. Please check your network.' })
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
+  const handleDisconnect = async () => {
+    try {
+      await fetch('/api/channels/facebook', { method: 'DELETE' })
+      onConnected()
+      onClose()
+    } catch { /* ignore */ }
+  }
+
+  const isConnected = channel?.isActive && (() => {
+    try { return JSON.parse(channel.config).isConnected } catch { return false }
+  })()
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center">
+              <MessageCircle className="h-4 w-4 text-blue-600" />
+            </div>
+            Connect Facebook Messenger
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-4">
+          {/* Connection Status */}
+          {isConnected && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              <span className="text-sm text-emerald-700">Facebook Page is connected and active</span>
+            </div>
+          )}
+
+          {/* Steps */}
+          <div className="space-y-3">
+            <button
+              className="w-full text-left"
+              onClick={() => setStep(step === 1 ? 0 : 1)}
+            >
+              <div className="flex items-center gap-2 p-2">
+                <Badge className={step >= 1 ? 'bg-slate-900' : 'bg-slate-300'}>1</Badge>
+                <span className="text-sm font-medium">Create a Facebook App</span>
+                {step === 1 ? <ChevronDown className="h-4 w-4 ml-auto" /> : <ChevronRight className="h-4 w-4 ml-auto" />}
+              </div>
+            </button>
+            <AnimatePresence>
+              {step >= 1 && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="bg-slate-50 rounded-lg p-4 text-sm space-y-2 ml-6">
+                    <p className="font-medium">Follow these steps in the Meta Developer Portal:</p>
+                    <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground">
+                      <li>Go to <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline inline-flex items-center gap-0.5">developers.facebook.com/apps <ExternalLink className="h-3 w-3" /></a></li>
+                      <li>Click <strong>&quot;Create App&quot;</strong> → Select <strong>&quot;Business&quot;</strong> type</li>
+                      <li>Give your app a name (e.g., &quot;AI Support Hub&quot;)</li>
+                      <li>In your app dashboard, click <strong>&quot;Add Product&quot;</strong></li>
+                      <li>Find <strong>&quot;Messenger&quot;</strong> and click <strong>&quot;Set Up&quot;</strong></li>
+                      <li>Scroll to <strong>&quot;Access Tokens&quot;</strong> section</li>
+                      <li>Click <strong>&quot;Add or Remove Pages&quot;</strong> and select your Facebook Page</li>
+                      <li>Copy the <strong>Page Access Token</strong> generated</li>
+                    </ol>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <button
+              className="w-full text-left"
+              onClick={() => setStep(step === 2 ? 0 : 2)}
+            >
+              <div className="flex items-center gap-2 p-2">
+                <Badge className={step >= 2 ? 'bg-slate-900' : 'bg-slate-300'}>2</Badge>
+                <span className="text-sm font-medium">Configure Webhook</span>
+                {step === 2 ? <ChevronDown className="h-4 w-4 ml-auto" /> : <ChevronRight className="h-4 w-4 ml-auto" />}
+              </div>
+            </button>
+            <AnimatePresence>
+              {step >= 2 && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="bg-slate-50 rounded-lg p-4 text-sm space-y-2 ml-6">
+                    <p className="font-medium">Set up the webhook in your Facebook App:</p>
+                    <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground">
+                      <li>In Messenger settings, scroll to <strong>&quot;Webhooks&quot;</strong></li>
+                      <li>Click <strong>&quot;Subscribe&quot;</strong> to your Page</li>
+                      <li>Click <strong>&quot;Add Callback URL&quot;</strong></li>
+                      <li>Enter your webhook URL:<br />
+                        <code className="bg-white px-2 py-1 rounded text-xs block mt-1 font-mono">
+                          https://yourdomain.com/api/webhooks/facebook
+                        </code>
+                      </li>
+                      <li>Enter the Verify Token:<br />
+                        <code className="bg-white px-2 py-1 rounded text-xs block mt-1 font-mono">
+                          ai_support_hub_verify_token
+                        </code>
+                      </li>
+                      <li>Subscribe to these events: <strong>messages, messaging_postbacks, message_deliveries, message_reads</strong></li>
+                    </ol>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <button
+              className="w-full text-left"
+              onClick={() => setStep(step === 3 ? 0 : 3)}
+            >
+              <div className="flex items-center gap-2 p-2">
+                <Badge className={step >= 3 ? 'bg-slate-900' : 'bg-slate-300'}>3</Badge>
+                <span className="text-sm font-medium">Enter Credentials</span>
+                {step === 3 ? <ChevronDown className="h-4 w-4 ml-auto" /> : <ChevronRight className="h-4 w-4 ml-auto" />}
+              </div>
+            </button>
+            <AnimatePresence>
+              {step >= 3 && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-3 ml-6 pt-2">
+                    <div className="space-y-2">
+                      <Label>Facebook Page ID</Label>
+                      <Input
+                        value={formData.pageId}
+                        onChange={(e) => setFormData({ ...formData, pageId: e.target.value })}
+                        placeholder="e.g., 123456789012345"
+                      />
+                      <p className="text-xs text-muted-foreground">Found in your Page Settings → About → Page ID</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Page Name</Label>
+                      <Input
+                        value={formData.pageName}
+                        onChange={(e) => setFormData({ ...formData, pageName: e.target.value })}
+                        placeholder="e.g., My Company Page"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Page Access Token</Label>
+                      <Input
+                        type="password"
+                        value={formData.pageAccessToken}
+                        onChange={(e) => setFormData({ ...formData, pageAccessToken: e.target.value })}
+                        placeholder="EAAxxxxxxxxxxxxx"
+                      />
+                      <p className="text-xs text-muted-foreground">Generated in Messenger settings → Access Tokens</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>App ID <span className="text-muted-foreground">(optional)</span></Label>
+                        <Input
+                          value={formData.appId}
+                          onChange={(e) => setFormData({ ...formData, appId: e.target.value })}
+                          placeholder="123456789"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>App Secret <span className="text-muted-foreground">(optional)</span></Label>
+                        <Input
+                          type="password"
+                          value={formData.appSecret}
+                          onChange={(e) => setFormData({ ...formData, appSecret: e.target.value })}
+                          placeholder="abc123..."
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Webhook Verify Token</Label>
+                      <Input
+                        value={formData.verifyToken}
+                        onChange={(e) => setFormData({ ...formData, verifyToken: e.target.value })}
+                        placeholder="ai_support_hub_verify_token"
+                      />
+                      <p className="text-xs text-muted-foreground">Must match the verify token in your Facebook webhook config</p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Result Message */}
+          {result && (
+            <motion.div
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={cn(
+                'flex items-center gap-2 p-3 rounded-lg',
+                result.success ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'
+              )}
+            >
+              {result.success ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <XCircle className="h-4 w-4 text-red-600" />}
+              <span className={cn('text-sm', result.success ? 'text-emerald-700' : 'text-red-700')}>{result.message}</span>
+            </motion.div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-2 pt-2">
+            <Button
+              onClick={handleConnect}
+              disabled={isConnecting || !formData.pageId || !formData.pageAccessToken}
+              className="flex-1 bg-slate-900 hover:bg-slate-800"
+            >
+              {isConnecting ? 'Connecting...' : isConnected ? 'Update Connection' : 'Connect Facebook Page'}
+            </Button>
+            {isConnected && (
+              <Button variant="outline" onClick={handleDisconnect} className="text-destructive">
+                Disconnect
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ===================== WHATSAPP CONNECT DIALOG =====================
+
+function WhatsAppConnectDialog({
+  open,
+  onClose,
+  channel,
+  onConnected,
+}: {
+  open: boolean
+  onClose: () => void
+  channel: ChannelData | null
+  onConnected: () => void
+}) {
+  const [step, setStep] = useState(1)
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [formData, setFormData] = useState({
+    phoneNumberId: '',
+    businessAccountId: '',
+    whatsappAccessToken: '',
+    whatsappPhoneNumber: '',
+    businessName: '',
+    verifyToken: 'ai_support_hub_verify_token',
+  })
+
+  useEffect(() => {
+    if (channel && open) {
+      try {
+        const config = JSON.parse(channel.config)
+        setFormData({
+          phoneNumberId: config.phoneNumberId || '',
+          businessAccountId: config.businessAccountId || config.wabaId || '',
+          whatsappAccessToken: config.whatsappAccessToken || '',
+          whatsappPhoneNumber: config.whatsappPhoneNumber || '',
+          businessName: config.businessName || '',
+          verifyToken: config.verifyToken || 'ai_support_hub_verify_token',
+        })
+      } catch { /* ignore */ }
+    }
+  }, [channel, open])
+
+  const handleConnect = async () => {
+    setIsConnecting(true)
+    setResult(null)
+    try {
+      const res = await fetch('/api/channels/whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      })
+      const data = await res.json()
+      setResult({
+        success: data.isValid,
+        message: data.message,
+      })
+      if (data.isValid) {
+        onConnected()
+      }
+    } catch {
+      setResult({ success: false, message: 'Connection failed. Please check your network.' })
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
+  const handleDisconnect = async () => {
+    try {
+      await fetch('/api/channels/whatsapp', { method: 'DELETE' })
+      onConnected()
+      onClose()
+    } catch { /* ignore */ }
+  }
+
+  const isConnected = channel?.isActive && (() => {
+    try { return JSON.parse(channel.config).isConnected } catch { return false }
+  })()
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-green-50 flex items-center justify-center">
+              <Phone className="h-4 w-4 text-green-600" />
+            </div>
+            Connect WhatsApp Business
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-4">
+          {isConnected && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              <span className="text-sm text-emerald-700">WhatsApp Business is connected and active</span>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <button className="w-full text-left" onClick={() => setStep(step === 1 ? 0 : 1)}>
+              <div className="flex items-center gap-2 p-2">
+                <Badge className={step >= 1 ? 'bg-slate-900' : 'bg-slate-300'}>1</Badge>
+                <span className="text-sm font-medium">Set Up WhatsApp Business API</span>
+                {step === 1 ? <ChevronDown className="h-4 w-4 ml-auto" /> : <ChevronRight className="h-4 w-4 ml-auto" />}
+              </div>
+            </button>
+            <AnimatePresence>
+              {step >= 1 && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                  <div className="bg-slate-50 rounded-lg p-4 text-sm space-y-2 ml-6">
+                    <p className="font-medium">Set up WhatsApp Business API in Meta Business Suite:</p>
+                    <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground">
+                      <li>Go to <a href="https://business.facebook.com/wa/manage/phone-numbers/" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline inline-flex items-center gap-0.5">Meta Business Suite → WhatsApp <ExternalLink className="h-3 w-3" /></a></li>
+                      <li>Create a <strong>WhatsApp Business Account (WABA)</strong></li>
+                      <li>Create a <strong>Phone Number</strong> for your business</li>
+                      <li>Verify your business (Meta review process, takes 1-2 days)</li>
+                      <li>Go to <strong>App Dashboard → WhatsApp → API Setup</strong></li>
+                      <li>Copy the <strong>Phone Number ID</strong></li>
+                      <li>Copy the <strong>Permanent Access Token</strong></li>
+                    </ol>
+                    <div className="flex items-start gap-2 mt-2 p-2 bg-amber-50 rounded border border-amber-200">
+                      <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-700">You need a Meta Business Account and a verified WhatsApp Business profile. New accounts get free 1,000 conversations/month for testing.</p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <button className="w-full text-left" onClick={() => setStep(step === 2 ? 0 : 2)}>
+              <div className="flex items-center gap-2 p-2">
+                <Badge className={step >= 2 ? 'bg-slate-900' : 'bg-slate-300'}>2</Badge>
+                <span className="text-sm font-medium">Configure Webhook</span>
+                {step === 2 ? <ChevronDown className="h-4 w-4 ml-auto" /> : <ChevronRight className="h-4 w-4 ml-auto" />}
+              </div>
+            </button>
+            <AnimatePresence>
+              {step >= 2 && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                  <div className="bg-slate-50 rounded-lg p-4 text-sm space-y-2 ml-6">
+                    <p className="font-medium">Set up the webhook in WhatsApp settings:</p>
+                    <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground">
+                      <li>Go to <strong>App Dashboard → WhatsApp → Configuration</strong></li>
+                      <li>Click <strong>&quot;Edit&quot;</strong> next to Webhook</li>
+                      <li>Enter your Callback URL:<br />
+                        <code className="bg-white px-2 py-1 rounded text-xs block mt-1 font-mono">
+                          https://yourdomain.com/api/webhooks/whatsapp
+                        </code>
+                      </li>
+                      <li>Enter the Verify Token:<br />
+                        <code className="bg-white px-2 py-1 rounded text-xs block mt-1 font-mono">
+                          ai_support_hub_verify_token
+                        </code>
+                      </li>
+                      <li>Subscribe to webhook fields: <strong>messages</strong></li>
+                      <li>Click <strong>&quot;Verify and Save&quot;</strong></li>
+                    </ol>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <button className="w-full text-left" onClick={() => setStep(step === 3 ? 0 : 3)}>
+              <div className="flex items-center gap-2 p-2">
+                <Badge className={step >= 3 ? 'bg-slate-900' : 'bg-slate-300'}>3</Badge>
+                <span className="text-sm font-medium">Enter Credentials</span>
+                {step === 3 ? <ChevronDown className="h-4 w-4 ml-auto" /> : <ChevronRight className="h-4 w-4 ml-auto" />}
+              </div>
+            </button>
+            <AnimatePresence>
+              {step >= 3 && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                  <div className="space-y-3 ml-6 pt-2">
+                    <div className="space-y-2">
+                      <Label>Phone Number ID</Label>
+                      <Input
+                        value={formData.phoneNumberId}
+                        onChange={(e) => setFormData({ ...formData, phoneNumberId: e.target.value })}
+                        placeholder="e.g., 123456789012345"
+                      />
+                      <p className="text-xs text-muted-foreground">Found in WhatsApp → API Setup</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>WhatsApp Business Account ID <span className="text-muted-foreground">(optional)</span></Label>
+                      <Input
+                        value={formData.businessAccountId}
+                        onChange={(e) => setFormData({ ...formData, businessAccountId: e.target.value })}
+                        placeholder="e.g., 987654321"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Access Token</Label>
+                      <Input
+                        type="password"
+                        value={formData.whatsappAccessToken}
+                        onChange={(e) => setFormData({ ...formData, whatsappAccessToken: e.target.value })}
+                        placeholder="EAAxxxxxxxxxxxxx"
+                      />
+                      <p className="text-xs text-muted-foreground">Use a Permanent Access Token (not temporary)</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>Phone Number</Label>
+                        <Input
+                          value={formData.whatsappPhoneNumber}
+                          onChange={(e) => setFormData({ ...formData, whatsappPhoneNumber: e.target.value })}
+                          placeholder="+66 xxx xxx xxxx"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Business Name</Label>
+                        <Input
+                          value={formData.businessName}
+                          onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
+                          placeholder="My Company"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Webhook Verify Token</Label>
+                      <Input
+                        value={formData.verifyToken}
+                        onChange={(e) => setFormData({ ...formData, verifyToken: e.target.value })}
+                        placeholder="ai_support_hub_verify_token"
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {result && (
+            <motion.div
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={cn(
+                'flex items-center gap-2 p-3 rounded-lg',
+                result.success ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'
+              )}
+            >
+              {result.success ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <XCircle className="h-4 w-4 text-red-600" />}
+              <span className={cn('text-sm', result.success ? 'text-emerald-700' : 'text-red-700')}>{result.message}</span>
+            </motion.div>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              onClick={handleConnect}
+              disabled={isConnecting || !formData.phoneNumberId || !formData.whatsappAccessToken}
+              className="flex-1 bg-slate-900 hover:bg-slate-800"
+            >
+              {isConnecting ? 'Connecting...' : isConnected ? 'Update Connection' : 'Connect WhatsApp'}
+            </Button>
+            {isConnected && (
+              <Button variant="outline" onClick={handleDisconnect} className="text-destructive">
+                Disconnect
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ===================== MAIN SETTINGS PAGE =====================
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [channels, setChannels] = useState<ChannelData[]>([])
+  const [showFbDialog, setShowFbDialog] = useState(false)
+  const [showWaDialog, setShowWaDialog] = useState(false)
+  const [webhookUrlCopied, setWebhookUrlCopied] = useState(false)
 
   // Form state
   const [companyName, setCompanyName] = useState('')
@@ -47,6 +621,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchSettings()
+    fetchChannels()
   }, [])
 
   const fetchSettings = async () => {
@@ -57,7 +632,6 @@ export default function SettingsPage() {
         const data = await res.json()
         const settingsList = data.settings || []
         setSettings(settingsList)
-        // Apply to form
         const get = (key: string) => settingsList.find((s: SettingItem) => s.key === key)?.value || ''
         setCompanyName(get('company_name') || 'AI Support Hub')
         setAiMode(get('ai_mode') || 'suggest')
@@ -71,11 +645,19 @@ export default function SettingsPage() {
         setBusinessHoursEnd(get('business_hours_end') || '18:00')
         setAutoCloseHours(get('auto_close_inactive_hours') || '24')
       }
-    } catch {
-      // error
-    } finally {
+    } catch { /* error */ } finally {
       setIsLoading(false)
     }
+  }
+
+  const fetchChannels = async () => {
+    try {
+      const res = await fetch('/api/channels')
+      if (res.ok) {
+        const data = await res.json()
+        setChannels(data.channels || [])
+      }
+    } catch { /* error */ }
   }
 
   const saveSettings = async (updates: { key: string; value: string }[]) => {
@@ -86,9 +668,7 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings: updates }),
       })
-    } catch {
-      // error
-    } finally {
+    } catch { /* error */ } finally {
       setSaving(false)
     }
   }
@@ -108,6 +688,23 @@ export default function SettingsPage() {
       { key: 'auto_close_inactive_hours', value: autoCloseHours },
     ])
   }
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setWebhookUrlCopied(true)
+    setTimeout(() => setWebhookUrlCopied(false), 2000)
+  }
+
+  const facebookChannel = channels.find(c => c.type === 'facebook')
+  const whatsappChannel = channels.find(c => c.type === 'whatsapp')
+  const websiteChannel = channels.find(c => c.type === 'website')
+
+  const isFbConnected = facebookChannel?.isActive && (() => {
+    try { return JSON.parse(facebookChannel.config).isConnected } catch { return false }
+  })()
+  const isWaConnected = whatsappChannel?.isActive && (() => {
+    try { return JSON.parse(whatsappChannel.config).isConnected } catch { return false }
+  })()
 
   if (isLoading) {
     return (
@@ -133,13 +730,173 @@ export default function SettingsPage() {
           </Button>
         </div>
 
-        <Tabs defaultValue="general" className="w-full">
+        <Tabs defaultValue="channels" className="w-full">
           <TabsList className="bg-muted/50">
+            <TabsTrigger value="channels" className="gap-1.5"><MessageCircle className="h-4 w-4" /> Channels</TabsTrigger>
             <TabsTrigger value="general" className="gap-1.5"><Globe className="h-4 w-4" /> General</TabsTrigger>
             <TabsTrigger value="ai" className="gap-1.5"><Bot className="h-4 w-4" /> AI</TabsTrigger>
-            <TabsTrigger value="channels" className="gap-1.5"><MessageCircle className="h-4 w-4" /> Channels</TabsTrigger>
             <TabsTrigger value="widget" className="gap-1.5"><Palette className="h-4 w-4" /> Widget</TabsTrigger>
           </TabsList>
+
+          {/* ============================================= */}
+          {/* CHANNELS TAB - PRIMARY TAB FOR CONNECTING     */}
+          {/* ============================================= */}
+          <TabsContent value="channels" className="space-y-4 mt-4">
+            {/* Facebook Messenger */}
+            <Card className={cn('border-0 shadow-sm', isFbConnected && 'ring-1 ring-emerald-200')}>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+                    <MessageCircle className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-semibold">Facebook Messenger</h3>
+                      {isFbConnected ? (
+                        <Badge className="text-[10px] bg-emerald-100 text-emerald-700 h-5">
+                          <CheckCircle2 className="h-3 w-3 mr-0.5" /> Connected
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] h-5">Not Connected</Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {isFbConnected
+                        ? (() => { try { return `Connected to: ${JSON.parse(facebookChannel.config).pageName}` } catch { return 'Connected' } })()
+                        : 'Receive and reply to Facebook Page messages'}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className={isFbConnected ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-900 hover:bg-slate-800'}
+                    onClick={() => setShowFbDialog(true)}
+                  >
+                    {isFbConnected ? 'Configure' : 'Connect'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* WhatsApp Business */}
+            <Card className={cn('border-0 shadow-sm', isWaConnected && 'ring-1 ring-emerald-200')}>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-xl bg-green-50 flex items-center justify-center shrink-0">
+                    <Phone className="h-6 w-6 text-green-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-semibold">WhatsApp Business</h3>
+                      {isWaConnected ? (
+                        <Badge className="text-[10px] bg-emerald-100 text-emerald-700 h-5">
+                          <CheckCircle2 className="h-3 w-3 mr-0.5" /> Connected
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] h-5">Not Connected</Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {isWaConnected
+                        ? (() => { try { return `Connected to: ${JSON.parse(whatsappChannel.config).businessName || JSON.parse(whatsappChannel.config).whatsappPhoneNumber}` } catch { return 'Connected' } })()
+                        : 'Receive and reply to WhatsApp Business messages'}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    className={isWaConnected ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-900 hover:bg-slate-800'}
+                    onClick={() => setShowWaDialog(true)}
+                  >
+                    {isWaConnected ? 'Configure' : 'Connect'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Website Live Chat */}
+            <Card className="border-0 shadow-sm ring-1 ring-emerald-200">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-xl bg-slate-50 flex items-center justify-center shrink-0">
+                    <Globe className="h-6 w-6 text-slate-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-semibold">Website Live Chat</h3>
+                      <Badge className="text-[10px] bg-emerald-100 text-emerald-700 h-5">
+                        <CheckCircle2 className="h-3 w-3 mr-0.5" /> Active
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">Embed chat widget on your website</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Separator />
+
+            {/* Webhook URLs Reference */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Shield className="h-4 w-4" /> Webhook URLs
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label className="text-xs text-muted-foreground">Facebook Webhook URL</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <code className="flex-1 bg-slate-100 px-3 py-2 rounded text-xs font-mono truncate">
+                      https://yourdomain.com/api/webhooks/facebook
+                    </code>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => copyToClipboard('https://yourdomain.com/api/webhooks/facebook')}>
+                      {webhookUrlCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">WhatsApp Webhook URL</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <code className="flex-1 bg-slate-100 px-3 py-2 rounded text-xs font-mono truncate">
+                      https://yourdomain.com/api/webhooks/whatsapp
+                    </code>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => copyToClipboard('https://yourdomain.com/api/webhooks/whatsapp')}>
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Verify Token (for both)</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <code className="flex-1 bg-slate-100 px-3 py-2 rounded text-xs font-mono">
+                      ai_support_hub_verify_token
+                    </code>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => copyToClipboard('ai_support_hub_verify_token')}>
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Website Widget Embed Code */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader><CardTitle className="text-sm">Website Widget Embed Code</CardTitle></CardHeader>
+              <CardContent>
+                <div className="bg-slate-900 text-slate-100 rounded-lg p-4 font-mono text-xs overflow-x-auto">
+                  <pre>{`<script>
+  window.AI_SUPPORT_HUB = {
+    widgetId: 'your-widget-id',
+    position: '${widgetPosition}',
+    primaryColor: '${widgetColor}',
+    welcome: '${widgetWelcome}'
+  };
+</script>
+<script src="/widget.js" async></script>`}</pre>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">Add this code before the closing &lt;/body&gt; tag on your website</p>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           {/* General Settings */}
           <TabsContent value="general" className="space-y-4 mt-4">
@@ -234,71 +991,6 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
 
-          {/* Channel Settings */}
-          <TabsContent value="channels" className="space-y-4 mt-4">
-            <Card className="border-0 shadow-sm">
-              <CardHeader><CardTitle className="text-sm">Channel Connections</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                {/* Facebook */}
-                <div className="flex items-center gap-4 p-3 rounded-lg border border-border">
-                  <div className="h-10 w-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                    <MessageCircle className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-sm font-medium">Facebook Messenger</h3>
-                    <p className="text-xs text-muted-foreground">Connect your Facebook Page</p>
-                  </div>
-                  <Badge variant="outline" className="text-xs">Not Connected</Badge>
-                  <Button size="sm" variant="outline">Connect</Button>
-                </div>
-
-                {/* WhatsApp */}
-                <div className="flex items-center gap-4 p-3 rounded-lg border border-border">
-                  <div className="h-10 w-10 rounded-lg bg-green-50 flex items-center justify-center">
-                    <Phone className="h-5 w-5 text-green-600" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-sm font-medium">WhatsApp Business</h3>
-                    <p className="text-xs text-muted-foreground">Connect WhatsApp Cloud API</p>
-                  </div>
-                  <Badge variant="outline" className="text-xs">Not Connected</Badge>
-                  <Button size="sm" variant="outline">Connect</Button>
-                </div>
-
-                {/* Website */}
-                <div className="flex items-center gap-4 p-3 rounded-lg border border-border">
-                  <div className="h-10 w-10 rounded-lg bg-slate-50 flex items-center justify-center">
-                    <Globe className="h-5 w-5 text-slate-600" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-sm font-medium">Website Live Chat</h3>
-                    <p className="text-xs text-muted-foreground">Embed chat widget on your website</p>
-                  </div>
-                  <Badge className="text-xs bg-emerald-100 text-emerald-700">Active</Badge>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Embed Code */}
-            <Card className="border-0 shadow-sm">
-              <CardHeader><CardTitle className="text-sm">Website Widget Embed Code</CardTitle></CardHeader>
-              <CardContent>
-                <div className="bg-slate-900 text-slate-100 rounded-lg p-4 font-mono text-xs overflow-x-auto">
-                  <pre>{`<script>
-  window.AI_SUPPORT_HUB = {
-    widgetId: 'your-widget-id',
-    position: '${widgetPosition}',
-    primaryColor: '${widgetColor}',
-    welcome: '${widgetWelcome}'
-  };
-</script>
-<script src="/widget.js" async></script>`}</pre>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">Add this code before the closing &lt;/body&gt; tag on your website</p>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
           {/* Widget Settings */}
           <TabsContent value="widget" className="space-y-4 mt-4">
             <Card className="border-0 shadow-sm">
@@ -307,22 +999,13 @@ export default function SettingsPage() {
                 <div className="space-y-2">
                   <Label>Primary Color</Label>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={widgetColor}
-                      onChange={(e) => setWidgetColor(e.target.value)}
-                      className="h-9 w-12 rounded border border-border cursor-pointer"
-                    />
+                    <input type="color" value={widgetColor} onChange={(e) => setWidgetColor(e.target.value)} className="h-9 w-12 rounded border border-border cursor-pointer" />
                     <Input value={widgetColor} onChange={(e) => setWidgetColor(e.target.value)} className="flex-1" />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Welcome Message</Label>
-                  <Textarea
-                    value={widgetWelcome}
-                    onChange={(e) => setWidgetWelcome(e.target.value)}
-                    placeholder="Hello! How can we help you today?"
-                  />
+                  <Textarea value={widgetWelcome} onChange={(e) => setWidgetWelcome(e.target.value)} placeholder="Hello! How can we help you today?" />
                 </div>
                 <div className="space-y-2">
                   <Label>Widget Position</Label>
@@ -337,22 +1020,15 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
 
-            {/* Widget Preview */}
             <Card className="border-0 shadow-sm">
               <CardHeader><CardTitle className="text-sm">Widget Preview</CardTitle></CardHeader>
               <CardContent>
                 <div className="bg-slate-50 rounded-lg p-6 flex items-end justify-end min-h-[200px]">
                   <div className="text-right">
-                    <div
-                      className="rounded-t-2xl rounded-bl-sm p-4 text-white text-sm max-w-[240px] shadow-lg"
-                      style={{ backgroundColor: widgetColor }}
-                    >
+                    <div className="rounded-t-2xl rounded-bl-sm p-4 text-white text-sm max-w-[240px] shadow-lg" style={{ backgroundColor: widgetColor }}>
                       {widgetWelcome}
                     </div>
-                    <div
-                      className="h-12 w-12 rounded-full flex items-center justify-center mt-3 ml-auto shadow-lg cursor-pointer"
-                      style={{ backgroundColor: widgetColor }}
-                    >
+                    <div className="h-12 w-12 rounded-full flex items-center justify-center mt-3 ml-auto shadow-lg cursor-pointer" style={{ backgroundColor: widgetColor }}>
                       <MessageCircle className="h-6 w-6 text-white" />
                     </div>
                   </div>
@@ -362,6 +1038,20 @@ export default function SettingsPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Dialogs */}
+      <FacebookConnectDialog
+        open={showFbDialog}
+        onClose={() => setShowFbDialog(false)}
+        channel={facebookChannel || null}
+        onConnected={fetchChannels}
+      />
+      <WhatsAppConnectDialog
+        open={showWaDialog}
+        onClose={() => setShowWaDialog(false)}
+        channel={whatsappChannel || null}
+        onConnected={fetchChannels}
+      />
     </div>
   )
 }

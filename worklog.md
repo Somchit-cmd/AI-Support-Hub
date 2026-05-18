@@ -97,3 +97,32 @@ Stage Summary:
 - All pages fetch real data from API routes
 - Lint passes cleanly
 - App verified working on port 3000
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Build Facebook Messenger and WhatsApp Business integration with connection flows
+
+Work Log:
+- Enhanced Facebook webhook handler to fully process incoming messages (find/create customer, conversation, store message, update unread count)
+- Enhanced WhatsApp webhook handler to fully process incoming messages (find/create customer, conversation, store message, handle delivery status)
+- Created /api/channels/facebook API: POST to connect with page ID/access token, DELETE to disconnect, auto-verifies token with Facebook Graph API
+- Created /api/channels/whatsapp API: POST to connect with phone number ID/access token, DELETE to disconnect, auto-verifies token with WhatsApp Cloud API
+- Created /api/send/facebook API: Send outbound messages via Facebook Messenger API (graph.facebook.com/v21.0/me/messages)
+- Created /api/send/whatsapp API: Send outbound messages via WhatsApp Cloud API (supports text and template messages)
+- Rebuilt SettingsPage.tsx Channels tab as primary tab with:
+  - Facebook Connect dialog with 3-step guide (Create App → Configure Webhook → Enter Credentials)
+  - WhatsApp Connect dialog with 3-step guide (Set Up API → Configure Webhook → Enter Credentials)
+  - Real-time connection status badges (Connected/Not Connected)
+  - Webhook URLs reference section with copy-to-clipboard
+  - Website widget embed code generator
+- Both webhook handlers now use verify tokens stored in database settings
+- Both channel connect APIs save credentials and verify tokens to settings
+- All APIs handle proper error states and token verification
+
+Stage Summary:
+- Full Facebook Messenger integration: receive messages, send replies, webhook verification
+- Full WhatsApp Business integration: receive messages, send replies, webhook verification, template support
+- Production-ready connection dialogs with step-by-step setup guides
+- Outbound messaging APIs for both channels
+- Lint passes cleanly, app running on port 3000
