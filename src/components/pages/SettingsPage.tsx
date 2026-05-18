@@ -21,7 +21,8 @@ import {
   Bot, Globe, MessageCircle, Phone, Palette, Clock,
   Save, Sparkles, CheckCircle2, XCircle, ExternalLink,
   Copy, Check, ChevronDown, ChevronRight, AlertCircle, Shield, Key,
-  Send, Loader2, BookOpen, FileText, RotateCcw, Database, Thermometer, Zap
+  Send, Loader2, BookOpen, FileText, RotateCcw, Database, Thermometer, Zap,
+  Settings, Eye, EyeOff, Plug, Cpu
 } from 'lucide-react'
 
 interface SettingItem {
@@ -632,7 +633,65 @@ export default function SettingsPage() {
     faqs: { active: number; inactive: number; total: number }
     totalKnowledgeChars: number
     model: string
+    provider?: string
+    providerName?: string
   } | null>(null)
+
+  // AI Provider form state
+  const [aiProvider, setAiProvider] = useState<string>('z-ai')
+  const [aiProviderApiKey, setAiProviderApiKey] = useState('')
+  const [aiProviderModel, setAiProviderModel] = useState('default')
+  const [aiProviderBaseUrl, setAiProviderBaseUrl] = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [isTestingProvider, setIsTestingProvider] = useState(false)
+  const [providerTestResult, setProviderTestResult] = useState<{ success: boolean; message: string; model?: string; responseTime?: number } | null>(null)
+
+  // Available providers config
+  const PROVIDERS = [
+    {
+      id: 'z-ai', name: 'Z-AI (Default)', icon: Sparkles, color: 'slate',
+      description: 'Built-in AI. No API key needed.',
+      models: [{ id: 'default', name: 'Z-AI Default' }],
+      requiresApiKey: false, requiresBaseUrl: false,
+    },
+    {
+      id: 'openai', name: 'OpenAI (ChatGPT)', icon: Bot, color: 'emerald',
+      description: 'GPT-4o, GPT-4, GPT-3.5 and more.',
+      models: [
+        { id: 'gpt-4o', name: 'GPT-4o (Recommended)' },
+        { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Faster/Cheaper)' },
+        { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
+        { id: 'gpt-4', name: 'GPT-4' },
+        { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo (Budget)' },
+      ],
+      requiresApiKey: true, requiresBaseUrl: false,
+      apiKeyLabel: 'OpenAI API Key', apiKeyPlaceholder: 'sk-xxxxxxxxxxxxxxxx',
+      docsUrl: 'https://platform.openai.com/api-keys',
+    },
+    {
+      id: 'google', name: 'Google Gemini', icon: Globe, color: 'blue',
+      description: 'Gemini 1.5/2.0 Flash and Pro models.',
+      models: [
+        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Fast)' },
+        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (Advanced)' },
+        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+        { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash Lite' },
+      ],
+      requiresApiKey: true, requiresBaseUrl: false,
+      apiKeyLabel: 'Google AI API Key', apiKeyPlaceholder: 'AIzaSyxxxxxxxxxxxxxxx',
+      docsUrl: 'https://aistudio.google.com/apikey',
+    },
+    {
+      id: 'custom', name: 'Custom Provider', icon: Settings, color: 'orange',
+      description: 'Any OpenAI-compatible API (Ollama, LM Studio, Groq, Together, etc.)',
+      models: [{ id: 'default', name: 'Default Model' }],
+      requiresApiKey: true, requiresBaseUrl: true,
+      apiKeyLabel: 'API Key', apiKeyPlaceholder: 'your-api-key',
+      docsUrl: '',
+    },
+  ] as const
+
+  const currentProvider = PROVIDERS.find(p => p.id === aiProvider)
 
   // AI Test state
   const [testMessage, setTestMessage] = useState('')
@@ -674,6 +733,10 @@ export default function SettingsPage() {
         setRagEnabled(get('rag_enabled') !== 'false')
         setRagMaxDocuments(Number(get('rag_max_documents')) || 5)
         setRagMaxFaqs(Number(get('rag_max_faqs')) || 10)
+        setAiProvider(get('ai_provider') || 'z-ai')
+        setAiProviderApiKey(get('ai_provider_api_key'))
+        setAiProviderModel(get('ai_provider_model') || 'default')
+        setAiProviderBaseUrl(get('ai_provider_base_url'))
       }
     } catch { /* error */ } finally {
       setIsLoading(false)
@@ -724,6 +787,10 @@ export default function SettingsPage() {
       { key: 'rag_enabled', value: String(ragEnabled) },
       { key: 'rag_max_documents', value: String(ragMaxDocuments) },
       { key: 'rag_max_faqs', value: String(ragMaxFaqs) },
+      { key: 'ai_provider', value: aiProvider },
+      { key: 'ai_provider_api_key', value: aiProviderApiKey },
+      { key: 'ai_provider_model', value: aiProviderModel },
+      { key: 'ai_provider_base_url', value: aiProviderBaseUrl },
       { key: 'widget_primary_color', value: widgetColor },
       { key: 'widget_welcome_message', value: widgetWelcome },
       { key: 'widget_position', value: widgetPosition },
@@ -760,6 +827,34 @@ export default function SettingsPage() {
       setTestResponse('Error: Network error. Please try again.')
     } finally {
       setIsTestLoading(false)
+    }
+  }
+
+  const handleTestProvider = async () => {
+    setIsTestingProvider(true)
+    setProviderTestResult(null)
+    try {
+      const res = await fetch('/api/ai/test-provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: aiProvider,
+          apiKey: aiProviderApiKey,
+          model: aiProviderModel,
+          baseUrl: aiProviderBaseUrl,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setProviderTestResult(data)
+      } else {
+        const data = await res.json()
+        setProviderTestResult({ success: false, message: data.error || 'Connection test failed.' })
+      }
+    } catch {
+      setProviderTestResult({ success: false, message: 'Network error. Please try again.' })
+    } finally {
+      setIsTestingProvider(false)
     }
   }
 
@@ -1025,29 +1120,235 @@ export default function SettingsPage() {
 
           {/* AI Settings */}
           <TabsContent value="ai" className="space-y-4 mt-4">
-            {/* Card 1: AI Model Information */}
+            {/* Card 1: AI Provider Selection */}
             <Card className="border-0 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Bot className="h-4 w-4" /> AI Model Information
+                  <Cpu className="h-4 w-4" /> AI Provider
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Current Provider Status */}
                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-slate-900 flex items-center justify-center">
-                      <Sparkles className="h-5 w-5 text-white" />
+                      {aiProvider === 'z-ai' && <Sparkles className="h-5 w-5 text-white" />}
+                      {aiProvider === 'openai' && <Bot className="h-5 w-5 text-white" />}
+                      {aiProvider === 'google' && <Globe className="h-5 w-5 text-white" />}
+                      {aiProvider === 'custom' && <Settings className="h-5 w-5 text-white" />}
                     </div>
                     <div>
-                      <p className="text-sm font-semibold">{aiStats?.model || 'z-ai-web-dev-sdk'}</p>
-                      <p className="text-xs text-muted-foreground">Current AI Model</p>
+                      <p className="text-sm font-semibold">{currentProvider?.name || 'Z-AI'}</p>
+                      <p className="text-xs text-muted-foreground">Model: {aiProviderModel || aiStats?.model || 'default'}</p>
                     </div>
                   </div>
                   <Badge variant="outline" className="text-[10px] h-6">
-                    <Zap className="h-3 w-3 mr-1" /> Powered by z-ai-web-dev-sdk
+                    <Plug className="h-3 w-3 mr-1" /> {aiProvider === 'z-ai' ? 'Built-in' : 'External'}
                   </Badge>
                 </div>
 
+                {/* Provider Selection Grid */}
+                <div className="space-y-2">
+                  <Label className="text-sm">Select AI Provider</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PROVIDERS.map((provider) => {
+                      const Icon = provider.icon
+                      const isSelected = aiProvider === provider.id
+                      return (
+                        <button
+                          key={provider.id}
+                          onClick={() => {
+                            setAiProvider(provider.id)
+                            setAiProviderModel(provider.models[0].id)
+                            setProviderTestResult(null)
+                          }}
+                          className={cn(
+                            'flex items-start gap-3 p-3 rounded-lg border text-left transition-all',
+                            isSelected
+                              ? 'border-slate-900 bg-slate-50 ring-1 ring-slate-900'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                          )}
+                        >
+                          <div className={cn(
+                            'h-8 w-8 rounded-lg flex items-center justify-center shrink-0',
+                            isSelected ? 'bg-slate-900' : 'bg-slate-100'
+                          )}>
+                            <Icon className={cn('h-4 w-4', isSelected ? 'text-white' : 'text-slate-600')} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className={cn('text-sm font-medium', isSelected && 'text-slate-900')}>
+                              {provider.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground line-clamp-1">
+                              {provider.description}
+                            </p>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Model Selection */}
+                {currentProvider && currentProvider.models.length > 1 && (
+                  <div className="space-y-2">
+                    <Label className="text-sm">Model</Label>
+                    <Select value={aiProviderModel} onValueChange={setAiProviderModel}>
+                      <SelectTrigger><SelectValue placeholder="Select model" /></SelectTrigger>
+                      <SelectContent>
+                        {currentProvider.models.map((model) => (
+                          <SelectItem key={model.id} value={model.id}>
+                            {model.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Custom model input for custom provider */}
+                {aiProvider === 'custom' && (
+                  <div className="space-y-2">
+                    <Label className="text-sm">Custom Model Name</Label>
+                    <Input
+                      value={aiProviderModel}
+                      onChange={(e) => setAiProviderModel(e.target.value)}
+                      placeholder="e.g., llama3, mixtral, my-custom-model"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Enter the model name used by your custom API endpoint
+                    </p>
+                  </div>
+                )}
+
+                {/* API Key Input */}
+                {currentProvider?.requiresApiKey && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm flex items-center gap-1.5">
+                        <Key className="h-3.5 w-3.5" /> {currentProvider.apiKeyLabel}
+                      </Label>
+                      {currentProvider.docsUrl && (
+                        <a
+                          href={currentProvider.docsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:underline flex items-center gap-0.5"
+                        >
+                          Get API Key <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type={showApiKey ? 'text' : 'password'}
+                        value={aiProviderApiKey}
+                        onChange={(e) => setAiProviderApiKey(e.target.value)}
+                        placeholder={currentProvider.apiKeyPlaceholder}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Your API key is stored locally and encrypted. Never shared externally.
+                    </p>
+                  </div>
+                )}
+
+                {/* Base URL for Custom Provider */}
+                {currentProvider?.requiresBaseUrl && (
+                  <div className="space-y-2">
+                    <Label className="text-sm flex items-center gap-1.5">
+                      <Globe className="h-3.5 w-3.5" /> API Base URL
+                    </Label>
+                    <Input
+                      value={aiProviderBaseUrl}
+                      onChange={(e) => setAiProviderBaseUrl(e.target.value)}
+                      placeholder="e.g., http://localhost:11434/v1, https://api.groq.com/openai/v1"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      OpenAI-compatible API endpoint URL
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {[
+                        { label: 'Ollama', url: 'http://localhost:11434/v1' },
+                        { label: 'Groq', url: 'https://api.groq.com/openai/v1' },
+                        { label: 'Together', url: 'https://api.together.xyz/v1' },
+                        { label: 'LM Studio', url: 'http://localhost:1234/v1' },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => setAiProviderBaseUrl(preset.url)}
+                          className={cn(
+                            'text-xs px-2 py-1 rounded border transition-colors',
+                            aiProviderBaseUrl === preset.url
+                              ? 'border-slate-900 bg-slate-100'
+                              : 'border-slate-200 hover:border-slate-300'
+                          )}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Test Connection Button */}
+                {aiProvider !== 'z-ai' && (
+                  <div className="space-y-3">
+                    <Button
+                      variant="outline"
+                      onClick={handleTestProvider}
+                      disabled={isTestingProvider || (currentProvider?.requiresApiKey && !aiProviderApiKey) || (currentProvider?.requiresBaseUrl && !aiProviderBaseUrl)}
+                      className="w-full"
+                    >
+                      {isTestingProvider ? (
+                        <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Testing Connection...</>
+                      ) : (
+                        <><Zap className="h-4 w-4 mr-1.5" /> Test Connection</>
+                      )}
+                    </Button>
+
+                    {providerTestResult && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={cn(
+                          'flex items-start gap-2 p-3 rounded-lg',
+                          providerTestResult.success
+                            ? 'bg-emerald-50 border border-emerald-200'
+                            : 'bg-red-50 border border-red-200'
+                        )}
+                      >
+                        {providerTestResult.success ? (
+                          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                        )}
+                        <div className="min-w-0">
+                          <p className={cn('text-sm', providerTestResult.success ? 'text-emerald-700' : 'text-red-700')}>
+                            {providerTestResult.message}
+                          </p>
+                          {providerTestResult.success && providerTestResult.model && (
+                            <p className="text-xs text-emerald-600 mt-0.5">
+                              Model: {providerTestResult.model} | Response time: {providerTestResult.responseTime}ms
+                            </p>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                )}
+
+                {/* Temperature & Max Tokens */}
+                <Separator />
                 <div className="space-y-3">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">

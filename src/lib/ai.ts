@@ -1,17 +1,17 @@
-// AI Service - Uses z-ai-web-dev-sdk for chat completions
+// AI Service - Uses configurable AI providers (z-ai, OpenAI, Google Gemini, Custom)
 // This module should ONLY be used in backend (API routes)
 
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
+import {
+  generateWithProvider,
+  getAIProviderConfig,
+  clearProviderConfigCache,
+  AI_PROVIDERS,
+  type AIProviderType,
+} from './ai-providers'
 
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null
-
-async function getZAI() {
-  if (!zaiInstance) {
-    zaiInstance = await ZAI.create()
-  }
-  return zaiInstance
-}
+// Re-export provider utilities for use in API routes
+export { clearProviderConfigCache, AI_PROVIDERS, type AIProviderType }
 
 // Default system prompt for customer support
 const DEFAULT_SYSTEM_PROMPT = `You are an AI customer support assistant for a company. You are helpful, professional, and knowledgeable.
@@ -39,6 +39,10 @@ export interface AISettings {
   ragEnabled: boolean
   ragMaxDocuments: number
   ragMaxFaqs: number
+  aiProvider: AIProviderType
+  aiProviderApiKey: string
+  aiProviderModel: string
+  aiProviderBaseUrl: string
 }
 
 // Default AI settings
@@ -51,6 +55,10 @@ const DEFAULT_AI_SETTINGS: AISettings = {
   ragEnabled: true,
   ragMaxDocuments: 5,
   ragMaxFaqs: 10,
+  aiProvider: 'z-ai',
+  aiProviderApiKey: '',
+  aiProviderModel: 'default',
+  aiProviderBaseUrl: '',
 }
 
 // Load AI settings from database
@@ -65,13 +73,19 @@ export async function getAISettings(): Promise<AISettings> {
       'rag_enabled',
       'rag_max_documents',
       'rag_max_faqs',
+      'ai_provider',
+      'ai_provider_api_key',
+      'ai_provider_model',
+      'ai_provider_base_url',
     ]
 
     const settings = await db.setting.findMany({
       where: { key: { in: aiSettingKeys } },
     })
 
-    const get = (key: string) => settings.find((s) => s.key === key)?.value
+    const get = (key: string) => settings.find((s) => s.key === key)?.value || ''
+
+    const provider = (get('ai_provider') || 'z-ai') as AIProviderType
 
     return {
       aiMode: get('ai_mode') || DEFAULT_AI_SETTINGS.aiMode,
@@ -82,6 +96,10 @@ export async function getAISettings(): Promise<AISettings> {
       ragEnabled: get('rag_enabled') === 'false' ? false : DEFAULT_AI_SETTINGS.ragEnabled,
       ragMaxDocuments: Number(get('rag_max_documents')) || DEFAULT_AI_SETTINGS.ragMaxDocuments,
       ragMaxFaqs: Number(get('rag_max_faqs')) || DEFAULT_AI_SETTINGS.ragMaxFaqs,
+      aiProvider: provider,
+      aiProviderApiKey: get('ai_provider_api_key'),
+      aiProviderModel: get('ai_provider_model') || AI_PROVIDERS[provider]?.defaultModel || 'default',
+      aiProviderBaseUrl: get('ai_provider_base_url'),
     }
   } catch (error) {
     console.error('[AI Service] Error loading settings:', error)
@@ -193,11 +211,11 @@ export interface AIChatResponse {
   tokens: number
   model: string
   responseTime: number
+  provider: AIProviderType
 }
 
 export async function generateAIResponse(options: AIChatOptions): Promise<AIChatResponse> {
   const startTime = Date.now()
-  const zai = await getZAI()
 
   const systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT
 
@@ -217,34 +235,33 @@ export async function generateAIResponse(options: AIChatOptions): Promise<AIChat
   }
 
   const messages = [
-    { role: 'assistant' as const, content: fullSystemPrompt },
+    { role: 'assistant', content: fullSystemPrompt },
     ...options.messages.map((m) => ({
-      role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+      role: m.role,
       content: m.content,
     })),
   ]
 
   try {
-    const completion = await zai.chat.completions.create({
+    // Use the provider abstraction layer
+    const result = await generateWithProvider(
       messages,
-      thinking: { type: 'disabled' },
-    })
-
-    const content =
-      completion.choices[0]?.message?.content ||
-      'I apologize, but I was unable to generate a response. Please try again or connect with a human agent.'
-    const tokens = completion.usage?.total_tokens || 0
-    const responseTime = Date.now() - startTime
+      options.temperature,
+      options.maxTokens,
+    )
 
     return {
-      content,
-      tokens,
-      model: completion.model || 'gpt-4',
-      responseTime,
+      content: result.content,
+      tokens: result.tokens,
+      model: result.model,
+      responseTime: Date.now() - startTime,
+      provider: result.provider,
     }
   } catch (error) {
     console.error('[AI Service] Error generating response:', error)
-    throw new Error('Failed to generate AI response')
+    throw new Error(
+      error instanceof Error ? error.message : 'Failed to generate AI response'
+    )
   }
 }
 
@@ -255,6 +272,7 @@ export async function testAIWithRAG(message: string): Promise<{
   model: string
   tokens: number
   responseTime: number
+  provider: AIProviderType
 }> {
   const startTime = Date.now()
   const settings = await getAISettings()
@@ -276,6 +294,7 @@ export async function testAIWithRAG(message: string): Promise<{
     model: aiResponse.model,
     tokens: aiResponse.tokens,
     responseTime: Date.now() - startTime,
+    provider: aiResponse.provider,
   }
 }
 
@@ -285,27 +304,23 @@ export async function generateSuggestedReplies(
   lastMessages: string,
   count: number = 3
 ): Promise<string[]> {
-  const zai = await getZAI()
-
-  const completion = await zai.chat.completions.create({
-    messages: [
-      {
-        role: 'assistant',
-        content: `You are a customer support assistant suggesting reply options for a human agent. 
+  const messages = [
+    {
+      role: 'assistant',
+      content: `You are a customer support assistant suggesting reply options for a human agent. 
 Generate ${count} different suggested replies based on the conversation context. 
 Each reply should have a different tone or approach.
 Return ONLY a JSON array of strings, no other text. Example: ["reply1", "reply2", "reply3"]`,
-      },
-      {
-        role: 'user',
-        content: `Conversation context: ${conversationContext}\n\nLast messages: ${lastMessages}\n\nGenerate ${count} suggested replies:`,
-      },
-    ],
-    thinking: { type: 'disabled' },
-  })
+    },
+    {
+      role: 'user',
+      content: `Conversation context: ${conversationContext}\n\nLast messages: ${lastMessages}\n\nGenerate ${count} suggested replies:`,
+    },
+  ]
 
   try {
-    const content = completion.choices[0]?.message?.content || '[]'
+    const result = await generateWithProvider(messages)
+    const content = result.content || '[]'
     const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     return JSON.parse(cleaned)
   } catch {
@@ -315,70 +330,70 @@ Return ONLY a JSON array of strings, no other text. Example: ["reply1", "reply2"
 
 // Detect language of input text
 export async function detectLanguage(text: string): Promise<string> {
-  const zai = await getZAI()
+  const messages = [
+    {
+      role: 'assistant',
+      content:
+        'Detect the language of the following text. Respond with ONLY one word: "english", "thai", "lao", or "other". No other text.',
+    },
+    {
+      role: 'user',
+      content: text.substring(0, 200),
+    },
+  ]
 
-  const completion = await zai.chat.completions.create({
-    messages: [
-      {
-        role: 'assistant',
-        content:
-          'Detect the language of the following text. Respond with ONLY one word: "english", "thai", "lao", or "other". No other text.',
-      },
-      {
-        role: 'user',
-        content: text.substring(0, 200),
-      },
-    ],
-    thinking: { type: 'disabled' },
-  })
-
-  return completion.choices[0]?.message?.content?.toLowerCase().trim() || 'english'
+  try {
+    const result = await generateWithProvider(messages)
+    return result.content?.toLowerCase().trim() || 'english'
+  } catch {
+    return 'english'
+  }
 }
 
 // Analyze customer sentiment
 export async function analyzeSentiment(
   text: string
 ): Promise<'positive' | 'neutral' | 'negative'> {
-  const zai = await getZAI()
+  const messages = [
+    {
+      role: 'assistant',
+      content:
+        'Analyze the sentiment of the following text. Respond with ONLY one word: "positive", "neutral", or "negative". No other text.',
+    },
+    {
+      role: 'user',
+      content: text.substring(0, 500),
+    },
+  ]
 
-  const completion = await zai.chat.completions.create({
-    messages: [
-      {
-        role: 'assistant',
-        content:
-          'Analyze the sentiment of the following text. Respond with ONLY one word: "positive", "neutral", or "negative". No other text.',
-      },
-      {
-        role: 'user',
-        content: text.substring(0, 500),
-      },
-    ],
-    thinking: { type: 'disabled' },
-  })
-
-  const result = completion.choices[0]?.message?.content?.toLowerCase().trim() || 'neutral'
-  if (['positive', 'negative'].includes(result)) return result as 'positive' | 'negative'
-  return 'neutral'
+  try {
+    const result = await generateWithProvider(messages)
+    const parsed = result.content?.toLowerCase().trim() || 'neutral'
+    if (['positive', 'negative'].includes(parsed)) return parsed as 'positive' | 'negative'
+    return 'neutral'
+  } catch {
+    return 'neutral'
+  }
 }
 
 // Summarize a conversation
 export async function summarizeConversation(messages: string): Promise<string> {
-  const zai = await getZAI()
+  const formattedMessages = [
+    {
+      role: 'assistant',
+      content:
+        'Summarize the following customer support conversation in 2-3 sentences. Focus on the main issue and resolution status.',
+    },
+    {
+      role: 'user',
+      content: messages,
+    },
+  ]
 
-  const completion = await zai.chat.completions.create({
-    messages: [
-      {
-        role: 'assistant',
-        content:
-          'Summarize the following customer support conversation in 2-3 sentences. Focus on the main issue and resolution status.',
-      },
-      {
-        role: 'user',
-        content: messages,
-      },
-    ],
-    thinking: { type: 'disabled' },
-  })
-
-  return completion.choices[0]?.message?.content || 'No summary available.'
+  try {
+    const result = await generateWithProvider(formattedMessages)
+    return result.content || 'No summary available.'
+  } catch {
+    return 'No summary available.'
+  }
 }

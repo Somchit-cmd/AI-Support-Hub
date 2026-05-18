@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getAISettings } from '@/lib/ai'
+import { AI_PROVIDERS, getAIProviderConfig } from '@/lib/ai-providers'
 
 export async function GET() {
   try {
@@ -29,6 +30,10 @@ export async function GET() {
     // Get AI settings
     const aiSettings = await getAISettings()
 
+    // Get provider config
+    const providerConfig = await getAIProviderConfig()
+    const providerInfo = AI_PROVIDERS[providerConfig.provider]
+
     return NextResponse.json({
       documents: {
         active: activeDocs,
@@ -41,7 +46,9 @@ export async function GET() {
         total: activeFaqs + inactiveFaqs,
       },
       totalKnowledgeChars: totalChars,
-      model: 'z-ai-web-dev-sdk',
+      model: providerConfig.model || providerInfo?.defaultModel || 'default',
+      provider: providerConfig.provider,
+      providerName: providerInfo?.name || providerConfig.provider,
       settings: aiSettings,
     })
   } catch (error) {
