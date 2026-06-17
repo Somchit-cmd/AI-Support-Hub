@@ -5,7 +5,8 @@
 </p>
 
 <p align="center">
-  <strong>AI-Powered Omnichannel Customer Support Platform</strong>
+  <strong>AI-Powered Omnichannel Customer Support Platform</strong><br/>
+  Unifying Facebook Messenger, WhatsApp, and Website Chat with RAG-grounded AI assistance.
 </p>
 
 <p align="center">
@@ -13,7 +14,6 @@
   <img src="https://img.shields.io/badge/TypeScript-5-blue?logo=typescript" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Tailwind_CSS-4-38B2AC?logo=tailwindcss" alt="Tailwind CSS" />
   <img src="https://img.shields.io/badge/Prisma-ORM-2D3748?logo=prisma" alt="Prisma" />
-  <img src="https://img.shields.io/badge/Socket.IO-Real--time-010101?logo=socket.io" alt="Socket.IO" />
   <img src="https://img.shields.io/badge/AI-RAG_Powered-9333EA" alt="AI RAG" />
 </p>
 
@@ -21,62 +21,62 @@
 
 ## Overview
 
-**AI Support Hub** is a production-ready, AI-powered customer support platform that unifies conversations from multiple channels into a single intelligent inbox. It leverages RAG (Retrieval-Augmented Generation) to provide accurate, knowledge-base-grounded AI responses, supports multilingual communication (English, Thai, Lao), and offers seamless human-AI collaboration.
+**AI Support Hub** is a customer support platform that unifies conversations from multiple channels into a single intelligent inbox. It uses RAG (Retrieval-Augmented Generation) to ground AI replies in your own knowledge base, supports multilingual communication (English, Thai, Lao), and offers collaborative human/AI workflows.
+
+> **Project status:** Functional demo / early-stage product. The core platform (inbox, CRM, knowledge base, multi-provider AI, real channel webhooks) is working. Some features are UI-only — see [Known Issues & Limitations](#known-issues--limitations) and [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) for an honest breakdown.
+
+---
 
 ## Key Features
 
 ### Omnichannel Messaging
-- **Facebook Messenger** integration via webhook
-- **WhatsApp Business** integration via Cloud API
-- **Website Live Chat** widget with real-time messaging
-- Unified inbox for all channels
+- **Facebook Messenger** — real webhook integration (Graph API v21.0) for receiving and sending messages
+- **WhatsApp Business** — real Cloud API integration for receiving and sending messages
+- **Website Live Chat** — *planned*; widget embed code is shown in Settings but the widget itself is not yet implemented
+- Unified inbox consolidating all channels into one view
 
-### AI-Powered Support
-- **RAG (Retrieval-Augmented Generation)** - AI responses grounded in your company knowledge base
-- **Auto-Reply Mode** - AI automatically responds to customers
-- **Suggest Mode** - AI suggests replies for human agents
-- **Human-Only Mode** - No AI intervention, agents handle everything
-- **Sentiment Analysis** - Real-time customer sentiment detection
-- **Language Detection** - Automatic detection of English, Thai, and Lao
-- **Conversation Summarization** - AI-generated conversation summaries
+### AI-Powered Support (5 providers)
+A fully-wired provider abstraction layer supporting:
+| Provider | Key required? | Models |
+|----------|---------------|--------|
+| **Z-AI** (default) | No | default |
+| **OpenAI** | Yes | gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-4, gpt-3.5-turbo |
+| **Google Gemini** | Yes | 1.5-flash/pro, 2.0-flash/lite |
+| **Anthropic Claude** | Yes | 3.5-sonnet, 3-haiku, 3-opus |
+| **Custom** | Yes | Any OpenAI-compatible endpoint (Ollama, Groq, Together, LM Studio) |
 
-### Knowledge Base (RAG)
-- Upload documents (PDF, DOCX, TXT) as AI knowledge sources
+- **RAG grounding** — AI replies incorporate context retrieved from your Documents & FAQs (keyword-scored retrieval)
+- **Three AI modes** per conversation:
+  - **Suggest** (default) — AI drafts replies an agent can accept, edit, or reject
+  - **Auto** — intended for automatic replies (manual trigger today; auto-trigger not yet wired)
+  - **Human** — AI disabled, agents handle everything
+- **Token usage & cost tracking** — daily aggregation, per-provider cost rates, budget warnings, and a usage dashboard in **Settings → AI**
+
+### Knowledge Base (RAG source)
+- Add documents by pasting text (txt/pdf/docx/url type tags)
 - Create and manage FAQ entries
 - Keyword-based relevance scoring for knowledge retrieval
-- Configurable RAG settings (max documents, max FAQs, temperature)
-
-### Real-Time Communication
-- Socket.IO powered real-time messaging
-- Typing indicators
-- Online presence and status tracking
-- Read receipts
-- Instant message delivery
+- Configurable RAG limits (max documents, max FAQs, temperature)
 
 ### Customer CRM
-- Customer profiles with contact details
-- Lead status tracking (New, Contacted, Qualified, etc.)
-- Sentiment tracking per customer
-- Tag system for customer categorization
-- Notes and activity history
+- Customer profiles with contact details across channels
+- Lead pipeline tracking (New → Contacted → Qualified → Proposal → Negotiation → Won/Lost)
+- Per-customer sentiment & tags
+- CSV export
 
 ### Team Management
-- Role-based access control (Super Admin, Admin, Agent, Viewer)
-- Agent status management (Online, Offline, Away, Busy)
-- Conversation assignment and routing
-- Staff performance overview
-
-### Automation
-- Rule-based automation engine
-- Triggers: new conversation, keyword match, sentiment change, inactivity
-- Configurable conditions and actions
-- Auto-assignment and auto-response rules
+- Role-based access: Super Admin, Admin, Agent, Viewer
+- Agent status management (Online, Away, Busy, Offline)
+- Add/remove staff
 
 ### Dashboard & Analytics
-- Real-time conversation statistics
-- AI performance metrics (response time, token usage)
-- Channel distribution overview
-- Agent workload visualization
+- 6 live stat cards (conversations, active chats, AI resolution %, response time, customers, messages)
+- 4 charts: daily messages, channel distribution, messages-by-sender, customer sentiment
+- Team performance ranking
+
+### Automation (UI available, engine pending)
+- Rule builder with triggers: New Conversation, Keyword Match, Sentiment Change, Inactivity
+- Rules are stored but not yet executed — see known issues
 
 ---
 
@@ -84,16 +84,76 @@
 
 | Category | Technology |
 |----------|------------|
-| **Framework** | Next.js 16 (App Router) |
+| **Framework** | Next.js 16 (App Router, Turbopack) |
 | **Language** | TypeScript 5 |
 | **Styling** | Tailwind CSS 4 + shadcn/ui |
-| **Database** | SQLite via Prisma ORM |
-| **Real-Time** | Socket.IO |
-| **AI** | z-ai-web-dev-sdk (LLM with RAG) |
-| **State Management** | Zustand |
+| **Database** | SQLite via Prisma ORM 6 |
+| **AI** | z-ai-web-dev-sdk, openai, @google/generative-ai, @anthropic-ai/sdk |
+| **State** | Zustand |
 | **Animations** | Framer Motion |
-| **Icons** | Lucide React |
 | **Charts** | Recharts |
+| **Icons** | Lucide React |
+| **Real-time** | Socket.IO (separate optional service, see known issues) |
+
+---
+
+## Quick Start
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) 18+ (recommended 20+)
+- npm (ships with Node.js)
+
+### Installation
+
+```bash
+# 1. Clone
+git clone https://github.com/Somchit-cmd/AI-Support-Hub.git
+cd AI-Support-Hub
+
+# 2. Install dependencies
+npm install
+
+# 3. Configure environment
+cp .env.example .env          # macOS/Linux
+copy .env.example .env        # Windows
+# Only DATABASE_URL is required - it defaults to a local SQLite file.
+
+# 4. Set up the database (creates tables)
+npx prisma generate
+npx prisma db push
+
+# 5. Seed demo data (admin user, sample customers, conversations, FAQs)
+npx tsx src/lib/seed.ts
+
+# 6. Start the dev server
+npm run dev
+```
+
+Open **http://localhost:3010** and sign in with the demo account below.
+
+### Demo Login
+
+| Field | Value |
+|-------|-------|
+| Email | `admin@company.com` |
+| Password | `admin123` |
+
+> The form is pre-filled. Note: the login route currently auto-provisions any email and does not verify passwords — see known issues. Use `admin@company.com` to get the seeded `super_admin` role.
+
+> **Windows note:** the original `package.json` scripts used Unix-only commands (`tee`, `cp`, `NODE_ENV=...`). They have been simplified to cross-platform Next.js commands. If you need the standalone production build, see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+
+---
+
+## Documentation
+
+Detailed docs live in the [`docs/`](docs/) folder:
+
+| Document | Contents |
+|----------|----------|
+| [**Architecture**](docs/ARCHITECTURE.md) | System diagram, request flow, data model, AI pipeline |
+| [**API Reference**](docs/API_REFERENCE.md) | Every endpoint, methods, request/response shapes |
+| [**Development Guide**](docs/DEVELOPMENT.md) | DB commands, AI provider setup, channel setup, testing |
+| [**Known Issues**](docs/KNOWN_ISSUES.md) | Honest list of incomplete/broken features and gaps |
 
 ---
 
@@ -102,288 +162,96 @@
 ```
 src/
 ├── app/
-│   ├── api/                          # API Routes
-│   │   ├── ai/                       # AI stats & test endpoints
-│   │   ├── auth/                     # Authentication (login, logout, me)
-│   │   ├── automation/               # Automation rules CRUD
-│   │   ├── channels/                 # Channel management & Facebook/WhatsApp setup
-│   │   ├── conversations/            # Conversations, messages, AI reply, assignment
+│   ├── api/                          # REST API routes (Route Handlers)
+│   │   ├── ai/                       # AI stats & provider test
+│   │   ├── auth/                     # login, logout, me
+│   │   ├── automation/               # Automation rule CRUD
+│   │   ├── channels/                 # Channel mgmt + FB/WA setup
+│   │   ├── conversations/            # conversations, messages, ai-reply, assign
 │   │   ├── customers/                # Customer CRUD
-│   │   ├── dashboard/                # Dashboard statistics
-│   │   ├── faqs/                     # FAQ management
-│   │   ├── knowledge/                # Knowledge base (documents + upload)
+│   │   ├── dashboard/                # Dashboard stats
+│   │   ├── faqs/                     # FAQ CRUD
+│   │   ├── knowledge/                # Knowledge documents
 │   │   ├── notifications/            # Notifications
-│   │   ├── send/                     # Send messages (Facebook, WhatsApp)
-│   │   ├── settings/                 # App settings
+│   │   ├── send/                     # Send to Facebook / WhatsApp
+│   │   ├── settings/                 # App settings (key-value)
 │   │   ├── staff/                    # Staff management
 │   │   └── webhooks/                 # Facebook & WhatsApp webhooks
-│   └── page.tsx                      # Main app entry (SPA)
+│   ├── layout.tsx                    # Root layout (fonts, ThemeProvider, Toaster)
+│   └── page.tsx                      # SPA entry (auth gate → Login or AppShell)
 ├── components/
-│   ├── auth/                         # Login page
-│   ├── chat/                         # Chat window, message bubbles, input
-│   ├── common/                       # Customer detail panel
-│   ├── inbox/                        # Conversation list & items
-│   ├── layout/                       # App shell with sidebar navigation
-│   ├── pages/                        # Page components (Dashboard, Inbox, etc.)
-│   └── ui/                           # shadcn/ui components
-├── hooks/                            # Custom React hooks
-│   ├── use-socket.ts                 # Socket.IO connection hook
-│   ├── use-toast.ts                  # Toast notifications
-│   └── use-mobile.ts                 # Mobile detection
+│   ├── auth/                         # LoginPage
+│   ├── layout/                       # AppShell (sidebar + topbar + page router)
+│   ├── pages/                        # Dashboard, Inbox, Customers, Knowledge,
+│   │                                 # Staff, Automation, Settings
+│   ├── chat/                         # Modular chat components (currently unused)
+│   ├── inbox/                        # Modular inbox components (currently unused)
+│   ├── common/                       # CustomerDetailPanel
+│   └── ui/                           # shadcn/ui primitives
+├── hooks/                            # use-socket, use-toast, use-mobile
 ├── lib/
-│   ├── ai.ts                         # AI service (RAG, chat, sentiment, etc.)
-│   ├── db.ts                         # Prisma client instance
+│   ├── ai.ts                         # RAG retrieval, prompt building, helpers
+│   ├── ai-providers.ts               # 5-provider abstraction layer
+│   ├── ai-usage.ts                   # Cost calc + daily usage aggregation
+│   ├── db.ts                         # Prisma client singleton
 │   ├── seed.ts                       # Database seeder
-│   ├── store.ts                      # Zustand stores (auth, conversations, etc.)
-│   └── utils.ts                      # Utility functions
-└── prisma/
-    └── schema.prisma                 # Database schema (13 models)
-
+│   ├── store.ts                      # Zustand stores (auth, app, conversations)
+│   └── utils.ts                      # cn() and helpers
+prisma/
+└── schema.prisma                     # 13 models (SQLite)
 mini-services/
-└── chat-service/                     # Socket.IO real-time service (port 3003)
+└── chat-service/                     # Standalone Socket.IO server (port 3003)
+public/
+└── banner.png
+docs/                                 # Project documentation
+├── ARCHITECTURE.md
+├── API_REFERENCE.md
+├── DEVELOPMENT.md
+└── KNOWN_ISSUES.md
 ```
 
 ---
 
-## Database Schema
+## Configuration
 
-The platform uses 13 Prisma models:
+Channel credentials (Facebook/WhatsApp tokens, verify tokens) and AI provider API keys are **stored in the database** via the **Settings** UI — they are **not** read from environment variables. The only required env var is `DATABASE_URL`. See [`.env.example`](.env.example).
 
-| Model | Description |
-|-------|-------------|
-| **User** | Staff accounts with role-based access |
-| **Channel** | Communication channels (Facebook, WhatsApp, Website) |
-| **Customer** | Customer profiles with CRM data |
-| **CustomerTag** | Tags for customer categorization |
-| **Conversation** | Support conversations with AI mode settings |
-| **Message** | Individual messages with metadata |
-| **Assignment** | Agent-to-conversation assignments |
-| **AiLog** | AI interaction logs and metrics |
-| **Document** | Knowledge base documents |
-| **Faq** | FAQ entries for RAG |
-| **AutomationRule** | Automation triggers and actions |
-| **Notification** | User notifications |
-| **Setting** | Application settings (key-value) |
+### AI Provider Setup
+1. Go to **Settings → AI**
+2. Pick a provider (Z-AI needs no key; others do)
+3. Paste your API key, choose a model
+4. Click **Test Connection** to verify
+5. Adjust temperature, max tokens, and RAG limits as needed
+
+### Channel Setup
+See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for step-by-step Facebook and WhatsApp setup, including webhook URLs.
 
 ---
 
-## Getting Started
+## Known Issues & Limitations
 
-### Prerequisites
+This project is functional but has known gaps. Full details in [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
 
-- [Node.js](https://nodejs.org/) 18+ or [Bun](https://bun.sh/)
-- npm, yarn, or bun package manager
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/Somchit-cmd/AI-Support-Hub.git
-cd AI-Support-Hub
-
-# Install dependencies
-bun install
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your configuration
-
-# Initialize the database
-bun run db:push
-
-# Start the development server
-bun run dev
-```
-
-### Environment Variables
-
-Create a `.env` file in the project root:
-
-```env
-# Database
-DATABASE_URL=file:./db/custom.db
-
-# Facebook Messenger (optional)
-FACEBOOK_PAGE_ACCESS_TOKEN=your_page_access_token
-FACEBOOK_APP_SECRET=your_app_secret
-FACEBOOK_VERIFY_TOKEN=your_verify_token
-
-# WhatsApp Business (optional)
-WHATSAPP_ACCESS_TOKEN=your_whatsapp_access_token
-WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
-WHATSAPP_VERIFY_TOKEN=your_verify_token
-```
-
-### Starting the Chat Service
-
-The real-time chat service runs separately on port 3003:
-
-```bash
-cd mini-services/chat-service
-bun install
-bun run dev
-```
-
----
-
-## Channel Setup
-
-### Facebook Messenger
-
-1. Create a Facebook App at [developers.facebook.com](https://developers.facebook.com/)
-2. Add Messenger to your app
-3. Generate a Page Access Token
-4. Configure the webhook URL: `https://your-domain.com/api/webhooks/facebook`
-5. Add your credentials in **Settings > Channels**
-
-### WhatsApp Business
-
-1. Set up a WhatsApp Business Account at [Meta Business Suite](https://business.facebook.com/)
-2. Create a WhatsApp Business app
-3. Get your Phone Number ID and Access Token
-4. Configure the webhook URL: `https://your-domain.com/api/webhooks/whatsapp`
-5. Add your credentials in **Settings > Channels**
-
-### Website Live Chat
-
-The website live chat works out of the box with the built-in Socket.IO service. No additional configuration needed.
-
----
-
-## AI & RAG Configuration
-
-### How the AI Works
-
-The platform uses **z-ai-web-dev-sdk** for AI capabilities with RAG (Retrieval-Augmented Generation):
-
-1. When a customer sends a message, the system retrieves relevant knowledge from your documents and FAQs
-2. The knowledge context is injected into the AI prompt
-3. The AI generates a response grounded in your company's actual data
-4. Responses are logged for analytics and improvement
-
-### AI Modes
-
-| Mode | Description |
-|------|-------------|
-| **Auto** | AI automatically responds to customers without agent intervention |
-| **Suggest** | AI suggests replies that agents can accept, modify, or reject |
-| **Human** | No AI intervention; agents handle all conversations |
-
-### Knowledge Base Setup
-
-1. Navigate to **Knowledge** in the sidebar
-2. Upload documents (PDF, DOCX, TXT) or add URLs
-3. Create FAQ entries with questions and answers
-4. The AI will automatically use this knowledge when generating responses
-
-### Configurable AI Settings
-
-Available in **Settings > AI**:
-
-- AI Mode (Auto / Suggest / Human)
-- AI Personality (Professional, Friendly, Casual)
-- Custom System Prompt
-- Temperature (0.0 - 1.0)
-- Max Tokens
-- RAG Enabled / Disabled
-- Max Documents per query
-- Max FAQs per query
-
----
-
-## Screenshots
-
-### Dashboard
-Real-time overview of conversations, AI performance, and channel distribution.
-
-### Inbox
-Unified omnichannel inbox with conversation list, chat window, and customer details panel.
-
-### Knowledge Base
-Upload documents and manage FAQs that power the AI's RAG responses.
-
-### Settings
-Configure AI behavior, channel connections, and platform branding.
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| **Auth** | | |
-| POST | `/api/auth/login` | Staff login |
-| POST | `/api/auth/logout` | Staff logout |
-| GET | `/api/auth/me` | Get current user |
-| **Conversations** | | |
-| GET | `/api/conversations` | List conversations |
-| GET | `/api/conversations/[id]` | Get conversation with messages |
-| POST | `/api/conversations/[id]/messages` | Send a message |
-| POST | `/api/conversations/[id]/ai-reply` | Generate AI reply |
-| POST | `/api/conversations/[id]/assign` | Assign agent |
-| **Customers** | | |
-| GET | `/api/customers` | List customers |
-| GET/PUT/DELETE | `/api/customers/[id]` | Customer CRUD |
-| **Knowledge** | | |
-| GET/POST | `/api/knowledge` | List/upload documents |
-| DELETE | `/api/knowledge/documents/[id]` | Delete document |
-| GET/POST | `/api/faqs` | FAQ CRUD |
-| **Channels** | | |
-| GET/POST | `/api/channels` | List/create channels |
-| PUT/DELETE | `/api/channels/[id]` | Update/delete channel |
-| **Webhooks** | | |
-| GET/POST | `/api/webhooks/facebook` | Facebook Messenger webhook |
-| GET/POST | `/api/webhooks/whatsapp` | WhatsApp webhook |
-| **AI** | | |
-| GET | `/api/ai/stats` | AI usage statistics |
-| POST | `/api/ai/test` | Test AI with a message |
-| **Other** | | |
-| GET | `/api/dashboard` | Dashboard statistics |
-| GET/POST | `/api/automation` | Automation rules CRUD |
-| GET/POST | `/api/staff` | Staff management |
-| GET/PUT | `/api/settings` | App settings |
-| GET | `/api/notifications` | User notifications |
-
----
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────┐
-│                   Frontend (Next.js)              │
-│         React + Zustand + shadcn/ui              │
-└─────────────┬─────────────────┬──────────────────┘
-              │                 │
-              ▼                 ▼
-┌─────────────────────┐ ┌─────────────────────┐
-│   Next.js API       │ │  Socket.IO Service   │
-│   Routes (REST)     │ │  (Port 3003)         │
-│                     │ │  Real-time messaging  │
-└─────────┬───────────┘ └──────────┬──────────┘
-          │                        │
-          ▼                        │
-┌─────────────────────┐           │
-│   AI Service        │           │
-│   (z-ai-web-dev-sdk)│           │
-│   + RAG Pipeline    │           │
-└─────────┬───────────┘           │
-          │                        │
-          ▼                        ▼
-┌─────────────────────────────────────────────────┐
-│              SQLite (Prisma ORM)                 │
-│    Conversations, Messages, Knowledge, etc.      │
-└─────────────────────────────────────────────────┘
-```
+**Most impactful:**
+- 🔴 **Authentication is demo-only** — no password verification, no real session, logout is a no-op
+- 🟡 **Agent replies don't reach FB/WhatsApp** — the inbox send box only writes to the DB; it doesn't call the channel send APIs
+- 🟡 **AI "Auto" mode is manual** — no background auto-trigger on incoming messages
+- 🟡 **Automation engine not implemented** — rules are stored but never evaluated
+- 🟡 **Website widget not implemented** — embed code shown in Settings, no `widget.js` exists
+- 🟡 **No real-time updates** — Socket.IO service exists but isn't wired into the app
+- 🟢 **Broken button** — Settings → AI "test AI" calls a non-existent endpoint (`/api/ai/test`)
 
 ---
 
 ## Contributing
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+Please read [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) before contributing.
 
 ---
 
@@ -394,5 +262,5 @@ This project is licensed under the MIT License.
 ---
 
 <p align="center">
-  Built with ❤️ using Next.js, TypeScript, and AI
+  Built with Next.js, TypeScript, Prisma, and AI
 </p>
