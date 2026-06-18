@@ -112,12 +112,13 @@ This list was verified against the source as of the documentation pass. If you f
 - [x] AI auto-mode triggered on inbound messages
 - [x] Automation rule engine
 - [x] Website live-chat widget
-- [x] Real-time widget delivery (SSE) — admin Inbox still polls
+- [x] Real-time widget delivery (SSE)
+- [x] Real-time admin Inbox (SSE)
 - [x] Sentiment analysis on inbound messages
 - [x] Real document parsing in Knowledge Base
-- [ ] Fix broken `/api/ai/test` → `/api/ai/test-provider` button
-- [ ] Implement attach / emoji in chat composer
-- [ ] Consolidate duplicated inbox components
+- [x] Fix broken `/api/ai/test` button — now a real RAG playground endpoint
+- [x] Implement attach / emoji in chat composer
+- [x] Consolidate duplicated inbox components — orphans removed
 - [x] Add `*.db` to `.gitignore`
 
 ---
@@ -131,6 +132,10 @@ This list was verified against the source as of the documentation pass. If you f
 - **Sentiment analysis** (2026-06-18) — `src/lib/sentiment.ts` scores inbound messages (EN/TH/LAO keyword heuristic), updates `Customer.sentiment`, and fires the `sentiment_change` automation rule.
 - **Real-time widget delivery** (2026-06-18) — `src/lib/realtime.ts` in-process bus + SSE stream `/api/widget/stream/[sessionId]`; `widget.js` uses EventSource with polling fallback.
 - **Real document parsing** (2026-06-18) — `src/lib/document-parser.ts` (pdfjs-dist + mammoth + URL fetch); knowledge route accepts `multipart/form-data` uploads and URL import.
+- **Broken AI test button** (2026-06-18) — `/api/ai/test` now exists; runs the full RAG pipeline on a test message via `testAIWithRAG()` (distinct from the `/api/ai/test-provider` connection probe).
+- **Attach / emoji composer buttons** (2026-06-18) — InboxPage composer now has a working emoji picker (20 common emojis) and a file attach button (uploads images/files up to 10 MB as message attachments).
+- **Consolidated duplicated inbox components** (2026-06-18) — removed 6 orphaned files: `src/components/chat/{ChatWindow,ChatInput,MessageBubble}.tsx`, `src/components/inbox/{ConversationList,ConversationItem}.tsx`, `src/hooks/use-socket.ts`. The live inline implementations in `InboxPage.tsx` are now the single source of truth.
+- **Real-time admin Inbox** (2026-06-18) — `src/lib/realtime.ts` admin bus + SSE stream `/api/conversations/stream`; `InboxPage` subscribes via EventSource and appends inbound messages instantly (was REST-on-select only). All three inbound paths publish via `notifyAdminMessage()`.
 
 ---
 

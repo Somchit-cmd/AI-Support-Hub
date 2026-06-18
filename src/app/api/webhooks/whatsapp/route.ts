@@ -5,6 +5,7 @@ import { generateAndSaveAIReply } from '@/lib/ai'
 import { dispatchToChannel } from '@/lib/channels'
 import { runRules } from '@/lib/automation'
 import { processInboundSentiment } from '@/lib/sentiment'
+import { notifyAdminMessage } from '@/lib/realtime'
 
 // WhatsApp Webhook Verification (GET)
 // When you configure your webhook in Meta Business Settings,
@@ -276,7 +277,7 @@ async function processWhatsAppMessage(data: {
     contactName: data.contactInfo?.name,
   }
 
-  await db.message.create({
+  const storedMessage = await db.message.create({
     data: {
       conversationId: conversation.id,
       senderType: 'customer',
@@ -288,6 +289,20 @@ async function processWhatsAppMessage(data: {
       createdAt: data.timestamp,
     },
   })
+
+  // Push to the admin inbox in real time.
+  notifyAdminMessage(
+    conversation.id,
+    {
+      id: storedMessage.id,
+      content: data.messageText,
+      senderType: 'customer',
+      contentType: data.contentType,
+      isInternal: false,
+      createdAt: storedMessage.createdAt,
+    },
+    { channelType: 'whatsapp', customerName: customer.name }
+  )
 
   // 5. Update conversation
   await db.conversation.update({

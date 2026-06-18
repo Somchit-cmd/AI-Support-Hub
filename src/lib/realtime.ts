@@ -25,7 +25,30 @@ export interface WidgetEvent {
   isTyping?: boolean
 }
 
+// Admin inbox events are broadcast to ALL connected staff clients (agents see
+// new inbound messages across all conversations, not just the one they have
+// open). This is the piece that replaces REST polling in InboxPage.
+export interface AdminEvent {
+  type: 'message' | 'conversation_updated'
+  conversationId: string
+  // For 'message': the new message payload.
+  message?: {
+    id: string
+    content: string
+    senderType: string
+    contentType: string
+    isInternal: boolean
+    createdAt: string
+  }
+  // For 'conversation_updated': changed conversation fields.
+  changes?: Record<string, unknown>
+  // Channel/customer context so the inbox list can render without a refetch.
+  channelType?: string
+  customerName?: string
+}
+
 const channels = new Map<string, Set<Listener>>()
+const adminListeners = new Set<(event: AdminEvent) => void>()
 
 export function subscribe(conversationId: string, listener: Listener): () => void {
   let set = channels.get(conversationId)
@@ -80,4 +103,62 @@ export function notifyWidgetMessage(conversationId: string, message: {
 /** How many widgets are currently listening (for debug/observability). */
 export function listenerCount(conversationId: string): number {
   return channels.get(conversationId)?.size || 0
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin inbox events (broadcast to all connected staff clients)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Subscribe to admin inbox events. Returns an unsubscribe function. */
+export function subscribeAdmin(listener: (event: AdminEvent) => void): () => void {
+  adminListeners.add(listener)
+  return () => {
+    adminListeners.delete(listener)
+  }
+}
+
+/** Broadcast an admin event to all connected staff clients. */
+export function publishAdminEvent(event: AdminEvent): void {
+  if (adminListeners.size === 0) return
+  for (const listener of adminListeners) {
+    try {
+      listener(event)
+    } catch {
+      // dead listener — ignore
+    }
+  }
+}
+
+/**
+ * Convenience: notify the admin inbox that a new message landed in a
+ * conversation. Call this whenever a message is created (by webhook, agent,
+ * AI, or automation) so open InboxPages update instantly.
+ */
+export function notifyAdminMessage(conversationId: string, message: {
+  id: string
+  content: string
+  senderType: string
+  contentType: string
+  isInternal: boolean
+  createdAt: string | Date
+}, context?: { channelType?: string; customerName?: string }): void {
+  publishAdminEvent({
+    type: 'message',
+    conversationId,
+    message: {
+      id: message.id,
+      content: message.content,
+      senderType: message.senderType,
+      contentType: message.contentType,
+      isInternal: message.isInternal,
+      createdAt: typeof message.createdAt === 'string' ? message.createdAt : message.createdAt.toISOString(),
+    },
+    channelType: context?.channelType,
+    customerName: context?.customerName,
+  })
+}
+
+/** How many admin clients are currently listening (for debug/observability). */
+export function adminListenerCount(): number {
+  return adminListeners.size
 }

@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { generateAndSaveAIReply } from '@/lib/ai'
 import { runRules } from '@/lib/automation'
 import { processInboundSentiment } from '@/lib/sentiment'
+import { notifyAdminMessage } from '@/lib/realtime'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public widget endpoints, scoped by sessionId (= conversation id).
@@ -117,6 +118,16 @@ export async function POST(
         metadata: JSON.stringify({ widget: true }),
       },
     })
+
+    // Push to the admin inbox in real time.
+    notifyAdminMessage(sessionId, {
+      id: message.id,
+      content: content.trim(),
+      senderType: 'customer',
+      contentType: 'text',
+      isInternal: false,
+      createdAt: message.createdAt,
+    }, { channelType: 'website' })
 
     // Update conversation bookkeeping.
     await db.conversation.update({

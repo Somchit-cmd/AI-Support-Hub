@@ -5,6 +5,7 @@ import { generateAndSaveAIReply } from '@/lib/ai'
 import { dispatchToChannel } from '@/lib/channels'
 import { runRules } from '@/lib/automation'
 import { processInboundSentiment } from '@/lib/sentiment'
+import { notifyAdminMessage } from '@/lib/realtime'
 
 // Facebook Webhook Verification (GET)
 // When you configure your webhook in Facebook Developer Portal,
@@ -262,7 +263,7 @@ async function processFacebookMessage(data: {
     attachments: data.attachments,
   }
 
-  await db.message.create({
+  const storedMessage = await db.message.create({
     data: {
       conversationId: conversation.id,
       senderType: 'customer',
@@ -274,6 +275,20 @@ async function processFacebookMessage(data: {
       createdAt: data.timestamp,
     },
   })
+
+  // Push to the admin inbox in real time.
+  notifyAdminMessage(
+    conversation.id,
+    {
+      id: storedMessage.id,
+      content,
+      senderType: 'customer',
+      contentType: data.messageText ? 'text' : 'image',
+      isInternal: false,
+      createdAt: storedMessage.createdAt,
+    },
+    { channelType: 'facebook', customerName: customer.name }
+  )
 
   // 5. Update conversation
   await db.conversation.update({

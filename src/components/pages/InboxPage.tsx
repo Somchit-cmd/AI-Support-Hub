@@ -20,7 +20,7 @@ import {
   MessageSquare, Globe, Phone, Search, Filter, Pin, Archive, MoreVertical,
   Send, Sparkles, StickyNote, Paperclip, Smile, ChevronRight, ChevronLeft,
   UserCheck, Clock, Zap, AlertCircle, Check, CheckCheck, X, Tag, Edit,
-  Mail, MessageCircle, Hash, Star, Trash2, ArrowDown
+  Mail, MessageCircle, Hash, Star, Trash2, ArrowDown, Loader2,
 } from 'lucide-react'
 
 // ===================== CONVERSATION LIST =====================
@@ -35,7 +35,7 @@ function ConversationListPanel() {
 
   const filteredConversations = conversations.filter((c) => {
     if (channelFilter !== 'all') {
-      const channelType = (c.channel as Record<string, string>)?.type || c.channelId
+      const channelType = (c.channel as unknown as Record<string, string>)?.type || c.channelId
       if (channelFilter === 'website' && channelType !== 'website') return false
       if (channelFilter === 'facebook' && channelType !== 'facebook') return false
       if (channelFilter === 'whatsapp' && channelType !== 'whatsapp') return false
@@ -218,7 +218,7 @@ function ConversationItem({ conversation, isSelected, onSelect }: {
 // ===================== CHAT WINDOW =====================
 
 function ChatWindowPanel() {
-  const { conversations, selectedConversationId, addMessage, updateConversation } = useConversationStore()
+  const { conversations, selectedConversationId, addMessage, updateConversation, fetchConversations } = useConversationStore()
   const user = useAuthStore((s) => s.user)
   const [message, setMessage] = useState('')
   const [isNote, setIsNote] = useState(false)
@@ -230,6 +230,9 @@ function ChatWindowPanel() {
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoadingMessages, setIsLoadingMessages] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const fetchMessages = useCallback(async (convId: string) => {
     setIsLoadingMessages(true)
@@ -259,6 +262,44 @@ function ChatWindowPanel() {
     setConversation(conv || null)
   }, [conversations, selectedConversationId])
 
+  // ---- Real-time: subscribe to the admin SSE stream ----
+  // Replaces REST polling. New inbound messages arrive instantly. We only
+  // append to the visible message list when the event is for the currently
+  // open conversation; otherwise the conversation-list refresh handles it.
+  useEffect(() => {
+    const supportsSSE = typeof window !== 'undefined' && 'EventSource' in window
+    if (!supportsSSE) return
+
+    const es = new EventSource('/api/conversations/stream')
+    es.onmessage = (ev) => {
+      try {
+        const event = JSON.parse(ev.data)
+        if (!event || event.type === 'connected') return
+
+        if (event.type === 'message' && event.message) {
+          // Refresh the conversation list so unread counts + previews update.
+          fetchConversations()
+          // If the open conversation is the one this message belongs to, append it.
+          if (event.conversationId === selectedConversationId) {
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === event.message.id)) return prev
+              return [...prev, event.message]
+            })
+          }
+        }
+      } catch {
+        // ignore malformed payloads
+      }
+    }
+    es.onerror = () => {
+      // SSE dropped (server restart / proxy). EventSource auto-reconnects,
+      // but if it fails repeatedly it stays closed; nothing to do here.
+    }
+    return () => {
+      es.close()
+    }
+  }, [selectedConversationId, fetchConversations])
+
   // Fetch messages when conversation is selected
   useEffect(() => {
     if (selectedConversationId) {
@@ -272,6 +313,66 @@ function ChatWindowPanel() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // ---- Emoji picker ----
+  const COMMON_EMOJIS = ['😀', '😄', '😍', '👍', '🙏', '🎉', '❤️', '🔥', '✅', '❌', '⭐', '💡', '🤝', '📞', '📧', '⏰', '😊', '🤔', '🙌', '💪']
+
+  const insertEmoji = (emoji: string) => {
+    setMessage((prev) => prev + emoji)
+    setShowEmojiPicker(false)
+  }
+
+  // ---- File attachment ----
+  // Sends the selected file as a message. For agent-to-agent context we store
+  // the filename inline and mark contentType so the bubble can render it.
+  const handleAttachFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !selectedConversationId) return
+
+    // Size guard (10 MB) — uploads are stored as metadata references for now.
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File too large. Maximum size is 10 MB.')
+      e.target.value = ''
+      return
+    }
+
+    setIsUploading(true)
+    try {
+      const isImage = file.type.startsWith('image/')
+      const reader = new FileReader()
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      const res = await fetch(`/api/conversations/${selectedConversationId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: file.name,
+          senderType: isNote ? 'system' : 'agent',
+          senderId: user?.id,
+          contentType: isImage ? 'image' : 'file',
+          isInternal: isNote,
+          metadata: JSON.stringify({ name: file.name, size: file.size, type: file.type, dataUrl }),
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setMessages((prev) => [...prev, data.message])
+        updateConversation(selectedConversationId, {
+          lastMessage: `📎 ${file.name}`,
+          lastMessageAt: new Date().toISOString(),
+        })
+      }
+    } catch {
+      // error
+    } finally {
+      setIsUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   const handleSend = async () => {
     if (!message.trim() || !selectedConversationId) return
@@ -579,12 +680,41 @@ function ChatWindowPanel() {
                   rows={1}
                 />
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 relative">
+                {/* Emoji picker popover */}
+                {showEmojiPicker && (
+                  <div className="absolute bottom-12 right-12 z-50 bg-card border border-border rounded-xl shadow-lg p-2 grid grid-cols-5 gap-1 w-[220px]">
+                    {COMMON_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => insertEmoji(emoji)}
+                        className="text-xl hover:bg-muted rounded-md p-1 transition-colors"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* Hidden file input for attachments */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={handleAttachFile}
+                  accept="image/*,.pdf,.doc,.docx,.txt,.zip"
+                />
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-9 w-9">
-                        <Paperclip className="h-4 w-4" />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading || !selectedConversationId}
+                      >
+                        {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Attach file</TooltipContent>
@@ -593,7 +723,12 @@ function ChatWindowPanel() {
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-9 w-9">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => setShowEmojiPicker((s) => !s)}
+                      >
                         <Smile className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
