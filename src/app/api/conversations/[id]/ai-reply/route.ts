@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
-import { generateAIResponse, getKnowledgeContext, getAISettings } from '@/lib/ai'
-import { recordUsage, calculateCost } from '@/lib/ai-usage'
+import { generateAndSaveAIReply } from '@/lib/ai'
+import { dispatchToChannel } from '@/lib/channels'
 
 export async function POST(
   request: Request,
@@ -10,127 +9,36 @@ export async function POST(
   try {
     const { id } = await params
 
-    const conversation = await db.conversation.findUnique({
-      where: { id },
-      include: {
-        customer: { include: { tags: true } },
-        messages: {
-          orderBy: { createdAt: 'asc' },
-          include: {
-            sender: { select: { id: true, name: true, avatar: true } },
-          },
-        },
-      },
-    })
+    // Generate, save, log, and record usage (shared pipeline).
+    const result = await generateAndSaveAIReply(id)
 
-    if (!conversation) {
-      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
-    }
-
-    // Check AI mode - only allow in auto or suggest mode
-    if (conversation.aiMode === 'human') {
-      return NextResponse.json(
-        { error: 'AI replies are disabled for this conversation (human mode)' },
-        { status: 400 }
-      )
-    }
-
-    // Build conversation context for AI
-    const conversationHistory = conversation.messages
-      .map((m) => `${m.senderType}: ${m.content}`)
-      .join('\n')
-
-    const recentMessages = conversation.messages.slice(-10).map((m) => ({
-      role: m.senderType === 'customer' ? 'user' : 'assistant',
-      content: m.content,
-    }))
-
-    // Load AI settings from database
-    const aiSettings = await getAISettings()
-
-    // Get the last customer message for smarter RAG retrieval
-    const lastCustomerMessage = conversation.messages
-      .filter((m) => m.senderType === 'customer')
-      .pop()?.content || ''
-
-    // Load knowledge base context using the smarter RAG function
-    const knowledgeContext = await getKnowledgeContext(lastCustomerMessage)
-
-    // Call AI service with settings from database
-    const aiResponse = await generateAIResponse({
-      messages: recentMessages,
-      customerName: conversation.customer.name,
-      knowledgeContext,
-      conversationHistory,
-      temperature: aiSettings.aiTemperature,
-      maxTokens: aiSettings.aiMaxTokens,
-    })
-
-    // Save AI message
-    const message = await db.message.create({
-      data: {
-        conversationId: id,
-        content: aiResponse.content,
-        senderType: 'ai',
-        contentType: 'text',
-        metadata: JSON.stringify({ model: aiResponse.model, tokens: aiResponse.tokens }),
-      },
-      include: {
-        sender: { select: { id: true, name: true, avatar: true } },
-      },
-    })
-
-    // Estimate prompt/completion tokens split
-    const promptTokens = Math.round(aiResponse.tokens * 0.6)
-    const completionTokens = aiResponse.tokens - promptTokens
-    const estimatedCost = calculateCost(aiResponse.provider, aiResponse.model, promptTokens, completionTokens)
-
-    // Save AI log with enhanced tracking
-    const aiLog = await db.aiLog.create({
-      data: {
-        conversationId: id,
-        messageId: message.id,
-        prompt: conversationHistory.slice(-1000),
-        response: aiResponse.content,
-        tokens: aiResponse.tokens,
-        promptTokens,
-        completionTokens,
-        model: aiResponse.model,
-        provider: aiResponse.provider,
-        responseTime: aiResponse.responseTime,
-        estimatedCost,
-      },
-    })
-
-    // Record usage for daily aggregation and budget tracking
-    await recordUsage({
-      provider: aiResponse.provider,
-      model: aiResponse.model,
-      promptTokens,
-      completionTokens,
-      totalTokens: aiResponse.tokens,
-      responseTime: aiResponse.responseTime,
-    })
-
-    // Update conversation
-    await db.conversation.update({
-      where: { id },
-      data: {
-        lastMessage: aiResponse.content,
-        lastMessageAt: new Date(),
-      },
+    // Deliver the AI reply to the external channel (Facebook/WhatsApp).
+    // Fire-and-forget: a delivery failure must not roll back the AI reply,
+    // since it is already saved and visible in the inbox.
+    dispatchToChannel(id, result.content).catch((err) => {
+      console.error('[AI Reply] Channel dispatch failed:', err)
     })
 
     return NextResponse.json({
-      message,
+      message: result.message,
       aiLog: {
-        id: aiLog.id,
-        tokens: aiLog.tokens,
-        model: aiLog.model,
-        responseTime: aiLog.responseTime,
+        id: result.aiLog.id,
+        tokens: result.aiLog.tokens,
+        model: result.aiLog.model,
+        responseTime: result.aiLog.responseTime,
       },
     })
   } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Failed to generate AI reply'
+
+    // Distinguish "disabled" (400) from real failures (500).
+    if (msg.includes('human mode')) {
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+    if (msg.includes('not found')) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+    }
+
     console.error('[AI Reply] Error:', error)
     return NextResponse.json({ error: 'Failed to generate AI reply' }, { status: 500 })
   }

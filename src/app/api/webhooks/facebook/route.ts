@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { isWebhookAuthorized } from '@/lib/webhook-security'
+import { generateAndSaveAIReply } from '@/lib/ai'
+import { dispatchToChannel } from '@/lib/channels'
 
 // Facebook Webhook Verification (GET)
 // When you configure your webhook in Facebook Developer Portal,
@@ -35,7 +38,19 @@ export async function GET(request: Request) {
 // Facebook sends events here when messages are received on your Page
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
+    // Capture the RAW body first — signature verification needs the exact bytes.
+    const rawBody = await request.text()
+    const signature = request.headers.get('x-hub-signature-256')
+
+    // Verify the webhook signature (skipped in dev if no app secret is set).
+    const { authorized, reason } = await isWebhookAuthorized(rawBody, signature)
+    if (!authorized) {
+      console.warn(`[Facebook Webhook] ❌ Unauthorized (${reason})`)
+      // Return 200 anyway so Facebook doesn't keep retrying, but don't process.
+      return NextResponse.json({ status: 'unauthorized' })
+    }
+
+    const body = JSON.parse(rawBody)
 
     // Always return 200 quickly to acknowledge receipt (Facebook requirement)
     // Process in background
@@ -67,6 +82,9 @@ export async function POST(request: Request) {
               messageId,
               attachments,
               timestamp: new Date(timeOfEvent),
+            }).then((conversationId) => {
+              // Trigger AI auto-reply if the conversation is in auto mode.
+              if (conversationId) maybeAutoReply(conversationId)
             }).catch((err) => {
               console.error('[Facebook Webhook] Error processing message:', err)
             })
@@ -97,6 +115,8 @@ export async function POST(request: Request) {
               pageId: recipientId,
               payload,
               timestamp: new Date(timeOfEvent),
+            }).then((conversationId) => {
+              if (conversationId) maybeAutoReply(conversationId)
             }).catch((err) => {
               console.error('[Facebook Webhook] Error processing postback:', err)
             })
@@ -113,7 +133,30 @@ export async function POST(request: Request) {
   }
 }
 
-// Process incoming Facebook message and store in database
+// Trigger an AI auto-reply if the conversation is in 'auto' mode.
+// Failures are logged but never bubble up — webhook must stay 200.
+async function maybeAutoReply(conversationId: string) {
+  try {
+    const convo = await db.conversation.findUnique({
+      where: { id: conversationId },
+      select: { aiMode: true },
+    })
+    if (!convo || convo.aiMode !== 'auto') return
+
+    console.log(`[Facebook Webhook] 🤖 Auto-replying to conversation ${conversationId}`)
+    const result = await generateAndSaveAIReply(conversationId)
+
+    // Deliver the AI reply back to Facebook.
+    dispatchToChannel(conversationId, result.content).catch((err) => {
+      console.error('[Facebook Webhook] Auto-reply delivery failed:', err)
+    })
+  } catch (err) {
+    console.error('[Facebook Webhook] Auto-reply failed:', err)
+  }
+}
+
+// Process incoming Facebook message and store in database.
+// Returns the conversation ID (used by the auto-reply hook).
 async function processFacebookMessage(data: {
   senderPsid: string
   recipientPageId: string
@@ -122,7 +165,7 @@ async function processFacebookMessage(data: {
   messageId: string
   attachments: Array<{ type: string; payload: { url?: string } }>
   timestamp: Date
-}) {
+}): Promise<string | null> {
   // 1. Find the Facebook channel by page ID
   const channels = await db.channel.findMany({ where: { type: 'facebook', isActive: true } })
   let channel = channels.find((c) => {
@@ -139,7 +182,7 @@ async function processFacebookMessage(data: {
 
   if (!channel) {
     console.log('[Facebook Webhook] No active Facebook channel found, skipping message')
-    return
+    return null
   }
 
   // 2. Find or create customer by PSID
@@ -241,19 +284,22 @@ async function processFacebookMessage(data: {
   })
 
   console.log(`[Facebook Webhook] ✅ Message stored in conversation ${conversation.id}`)
+
+  return conversation.id
 }
 
-// Process Facebook postback (Get Started, persistent menu clicks)
+// Process Facebook postback (Get Started, persistent menu clicks).
+// Returns the conversation ID (used by the auto-reply hook).
 async function processFacebookPostback(data: {
   senderPsid: string
   pageId: string
   payload: string
   timestamp: Date
-}) {
+}): Promise<string | null> {
   // Find or create customer and send welcome message
   const channels = await db.channel.findMany({ where: { type: 'facebook', isActive: true } })
   const channel = channels[0]
-  if (!channel) return
+  if (!channel) return null
 
   let customer = await db.customer.findFirst({
     where: { facebookId: data.senderPsid },
@@ -308,6 +354,8 @@ async function processFacebookPostback(data: {
       createdAt: data.timestamp,
     },
   })
+
+  return conversation.id
 }
 
 // Helper: Get Page Access Token from channel config

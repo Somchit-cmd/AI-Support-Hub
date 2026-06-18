@@ -19,13 +19,12 @@ An honest, verified list of what is incomplete, broken, or stubbed in AI Support
 
 **Fix direction:** Integrate NextAuth (`next-auth` is already a dependency but unused) or a JWT/cookie session, hash passwords with `bcrypt`, verify in `login`, and gate API routes on a real session.
 
-### 🔴 No webhook signature verification
-**Files:** [`src/app/api/webhooks/facebook/route.ts`](../src/app/api/webhooks/facebook/route.ts), [`src/app/api/webhooks/whatsapp/route.ts`](../src/app/api/webhooks/whatsapp/route.ts)
+### 🟡 Webhook signature verification is opt-in
+**Files:** [`src/lib/webhook-security.ts`](../src/lib/webhook-security.ts), [`src/app/api/webhooks/facebook/route.ts`](../src/app/api/webhooks/facebook/route.ts), [`src/app/api/webhooks/whatsapp/route.ts`](../src/app/api/webhooks/whatsapp/route.ts)
 
-- Facebook webhook POSTs ignore `x-hub-signature-256`.
-- WhatsApp webhook POSTs ignore the HMAC signature header.
+Both webhooks now verify the `x-hub-signature-256` HMAC header against the raw body using timing-safe comparison **when an app secret is configured**. Set the **App Secret** in the channel connect wizard (Settings → Channels) — it is persisted as `meta_app_secret` and shared by both channels.
 
-Anyone who knows your webhook URL can inject fake inbound messages. Add signature verification before exposing publicly.
+> ⚠️ Until an app secret is set, verification is **skipped** (dev mode, with a console warning) so the app stays usable locally. **Set the app secret before exposing the webhook publicly.** The Facebook App Secret and WhatsApp Cloud API app secret are the same value (from your Meta App → Settings → App Secret).
 
 ### 🔴 API routes have no authorization
 No route checks the caller's identity or role. Any caller can read/write any customer, send messages as any agent, change settings, or read AI usage. Should enforce auth + role checks.
@@ -34,19 +33,15 @@ No route checks the caller's identity or role. Any caller can read/write any cus
 
 ## Feature Gaps
 
-### 🟡 Agent replies don't reach Facebook & WhatsApp
-**Files:** [`src/components/pages/InboxPage.tsx`](../src/components/pages/InboxPage.tsx) (`handleSend`), [`src/app/api/conversations/[id]/messages/route.ts`](../src/app/api/conversations/[id]/messages/route.ts)
+### 🟡 Agent replies now reach Facebook & WhatsApp ✅
+**Files:** [`src/lib/channels.ts`](../src/lib/channels.ts), [`src/app/api/conversations/[id]/messages/route.ts`](../src/app/api/conversations/[id]/messages/route.ts), [`src/app/api/conversations/[id]/ai-reply/route.ts`](../src/app/api/conversations/[id]/ai-reply/route.ts)
 
-When an agent types a reply in the Inbox, it only `POST`s to `/api/conversations/[id]/messages` (which saves to the DB). It does **not** call `/api/send/facebook` or `/api/send/whatsapp`. So agent replies never reach the customer on those channels — they're only visible inside the app.
+**Resolved.** The messages POST route now calls `dispatchToChannel()` after saving, which routes the reply to Facebook (`/me/messages`) or WhatsApp (Cloud API) based on the conversation's channel type. Delivery is fire-and-forget — a channel failure logs an error but does not roll back the saved message (the reply is still visible in the inbox). AI replies from the `/ai-reply` endpoint are also dispatched.
 
-The send endpoints exist and work; they just aren't invoked. Fix: branch `handleSend` on the conversation's `channel.type` and call the appropriate send API, then persist on success.
+### 🟡 AI "Auto" mode triggers on inbound messages ✅
+**Files:** [`src/lib/ai.ts`](../src/lib/ai.ts) (`generateAndSaveAIReply`), [`src/app/api/webhooks/facebook/route.ts`](../src/app/api/webhooks/facebook/route.ts), [`src/app/api/webhooks/whatsapp/route.ts`](../src/app/api/webhooks/whatsapp/route.ts)
 
-### 🟡 AI "Auto" mode never auto-replies
-**Files:** [`src/app/api/conversations/[id]/ai-reply/route.ts`](../src/app/api/conversations/[id]/ai-reply/route.ts), webhooks
-
-`Conversation.aiMode` can be set to `auto`, and the `ai-reply` endpoint will run in that mode — but **nothing triggers it automatically**. Incoming webhook messages are stored without invoking AI. Auto-mode is effectively manual today.
-
-Fix: in the webhook handlers (or a post-message hook), if `conversation.aiMode === 'auto'`, call the AI reply pipeline.
+**Resolved.** Both webhooks now call `maybeAutoReply(conversationId)` after storing an inbound message. If the conversation's `aiMode === 'auto'`, it runs the shared `generateAndSaveAIReply()` pipeline and dispatches the AI reply back to the channel. The AI reply logic was extracted from the route into a shared function so manual (suggest) and automatic (auto) paths use identical code.
 
 ### 🟡 Automation rules are never executed
 **Files:** [`src/app/api/automation/route.ts`](../src/app/api/automation/route.ts), [`prisma/schema.prisma`](../prisma/schema.prisma) (`AutomationRule`)
@@ -119,10 +114,10 @@ The local SQLite file (and `-journal`/`-wal` sidecars) should be git-ignored now
 This list was verified against the source as of the documentation pass. If you fix something, tick it off and move it to a "Resolved" section below.
 
 - [ ] Real auth (NextAuth or JWT + bcrypt + session)
-- [ ] Webhook signature verification (FB + WA)
+- [x] Webhook signature verification (FB + WA) — opt-in via app secret
 - [ ] API route authorization (role checks)
-- [ ] Inbox replies forwarded to FB/WhatsApp
-- [ ] AI auto-mode triggered on inbound messages
+- [x] Inbox replies forwarded to FB/WhatsApp
+- [x] AI auto-mode triggered on inbound messages
 - [ ] Automation rule engine
 - [ ] Website live-chat widget
 - [ ] Real-time updates wired into Inbox (Socket.IO or SSE)
@@ -131,13 +126,15 @@ This list was verified against the source as of the documentation pass. If you f
 - [ ] Fix broken `/api/ai/test` → `/api/ai/test-provider` button
 - [ ] Implement attach / emoji in chat composer
 - [ ] Consolidate duplicated inbox components
-- [ ] Add `*.db` to `.gitignore`
+- [x] Add `*.db` to `.gitignore`
 
 ---
 
 ## Resolved
 
-*(Empty — move fixed items here with a date and PR reference.)*
+- **Agent replies reach FB/WhatsApp** (2026-06-18) — `dispatchToChannel()` in messages POST route + shared send helpers in `src/lib/channels.ts`.
+- **AI auto-mode triggers on inbound messages** (2026-06-18) — `maybeAutoReply()` in both webhooks; shared `generateAndSaveAIReply()` extracted to `src/lib/ai.ts`.
+- **Webhook signature verification** (2026-06-18) — `verifyMetaSignature()` in `src/lib/webhook-security.ts`; opt-in via `meta_app_secret` setting (set in connect wizard). Skipped with a warning when no secret is configured.
 
 ---
 

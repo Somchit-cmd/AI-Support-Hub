@@ -274,7 +274,7 @@ function FacebookConnectDialog({
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>App Secret <span className="text-muted-foreground">(optional)</span></Label>
+                        <Label>App Secret <span className="text-muted-foreground">(required for webhook security)</span></Label>
                         <Input
                           type="password"
                           value={formData.appSecret}
@@ -357,6 +357,7 @@ function WhatsAppConnectDialog({
     whatsappPhoneNumber: '',
     businessName: '',
     verifyToken: 'ai_support_hub_verify_token',
+    appSecret: '',
   })
 
   useEffect(() => {
@@ -370,6 +371,7 @@ function WhatsAppConnectDialog({
           whatsappPhoneNumber: config.whatsappPhoneNumber || '',
           businessName: config.businessName || '',
           verifyToken: config.verifyToken || 'ai_support_hub_verify_token',
+          appSecret: config.appSecret || '',
         })
       } catch { /* ignore */ }
     }
@@ -558,6 +560,16 @@ function WhatsAppConnectDialog({
                         onChange={(e) => setFormData({ ...formData, verifyToken: e.target.value })}
                         placeholder="ai_support_hub_verify_token"
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>App Secret <span className="text-muted-foreground">(required for webhook security)</span></Label>
+                      <Input
+                        type="password"
+                        value={formData.appSecret}
+                        onChange={(e) => setFormData({ ...formData, appSecret: e.target.value })}
+                        placeholder="abc123..."
+                      />
+                      <p className="text-xs text-muted-foreground">Found in your Meta App → Settings → App Secret</p>
                     </div>
                   </div>
                 </motion.div>
@@ -1125,17 +1137,18 @@ export default function SettingsPage() {
               <CardHeader><CardTitle className="text-sm">Website Widget Embed Code</CardTitle></CardHeader>
               <CardContent>
                 <div className="bg-slate-900 text-slate-100 rounded-lg p-4 font-mono text-xs overflow-x-auto">
-                  <pre>{`<script>
-  window.AI_SUPPORT_HUB = {
-    widgetId: 'your-widget-id',
-    position: '${widgetPosition}',
-    primaryColor: '${widgetColor}',
-    welcome: '${widgetWelcome}'
-  };
-</script>
-<script src="/widget.js" async></script>`}</pre>
+                  <pre>{`<!-- AI Support Hub widget — paste before </body> -->
+<script>window.__AI_SUPPORT_HUB__ = "https://YOUR-APP-DOMAIN.com";</script>
+<script src="https://YOUR-APP-DOMAIN.com/widget.js" async></script>`}</pre>
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">Add this code before the closing &lt;/body&gt; tag on your website</p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Replace <code className="bg-slate-100 px-1 rounded">YOUR-APP-DOMAIN.com</code> with
+                  your deployed app URL, then add this code before the closing &lt;/body&gt; tag on your website.
+                  The widget color, welcome message, and position are configured below.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  See <code className="bg-slate-100 px-1 rounded">docs/WORDPRESS_WIDGET.md</code> for WordPress setup.
+                </p>
               </CardContent>
             </Card>
           </TabsContent>

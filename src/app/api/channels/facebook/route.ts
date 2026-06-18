@@ -90,6 +90,15 @@ export async function POST(request: Request) {
       create: { key: 'facebook_page_access_token', value: pageAccessToken, category: 'channels' },
     })
 
+    // Persist the Meta app secret for webhook signature verification.
+    if (appSecret) {
+      await db.setting.upsert({
+        where: { key: 'meta_app_secret' },
+        update: { value: appSecret },
+        create: { key: 'meta_app_secret', value: appSecret, category: 'channels' },
+      })
+    }
+
     return NextResponse.json({
       channel,
       isValid,

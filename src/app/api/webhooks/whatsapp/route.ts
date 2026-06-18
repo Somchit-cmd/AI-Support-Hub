@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { isWebhookAuthorized } from '@/lib/webhook-security'
+import { generateAndSaveAIReply } from '@/lib/ai'
+import { dispatchToChannel } from '@/lib/channels'
 
 // WhatsApp Webhook Verification (GET)
 // When you configure your webhook in Meta Business Settings,
@@ -34,7 +37,18 @@ export async function GET(request: Request) {
 // WhatsApp sends events here when messages are received on your Business number
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
+    // Capture the RAW body first — signature verification needs the exact bytes.
+    const rawBody = await request.text()
+    const signature = request.headers.get('x-hub-signature-256')
+
+    // Verify the webhook signature (skipped in dev if no app secret is set).
+    const { authorized, reason } = await isWebhookAuthorized(rawBody, signature)
+    if (!authorized) {
+      console.warn(`[WhatsApp Webhook] ❌ Unauthorized (${reason})`)
+      return NextResponse.json({ status: 'unauthorized' })
+    }
+
+    const body = JSON.parse(rawBody)
 
     if (body.object) {
       for (const entry of body.entry || []) {
@@ -93,7 +107,7 @@ export async function POST(request: Request) {
 
               console.log(`[WhatsApp Webhook] 📩 Message from ${from}, type: ${type}, text: ${messageText}`)
 
-              // Process the message
+              // Process the message, then trigger AI auto-reply if applicable.
               processWhatsAppMessage({
                 from,
                 messageId,
@@ -102,6 +116,8 @@ export async function POST(request: Request) {
                 whatsappMessageId: messageId,
                 timestamp,
                 contactInfo: change.value?.contacts?.[0],
+              }).then((conversationId) => {
+                if (conversationId) maybeAutoReply(conversationId)
               }).catch((err) => {
                 console.error('[WhatsApp Webhook] Error processing message:', err)
               })
@@ -136,7 +152,30 @@ export async function POST(request: Request) {
   }
 }
 
-// Process incoming WhatsApp message and store in database
+// Trigger an AI auto-reply if the conversation is in 'auto' mode.
+// Failures are logged but never bubble up — webhook must stay 200.
+async function maybeAutoReply(conversationId: string) {
+  try {
+    const convo = await db.conversation.findUnique({
+      where: { id: conversationId },
+      select: { aiMode: true },
+    })
+    if (!convo || convo.aiMode !== 'auto') return
+
+    console.log(`[WhatsApp Webhook] 🤖 Auto-replying to conversation ${conversationId}`)
+    const result = await generateAndSaveAIReply(conversationId)
+
+    // Deliver the AI reply back to WhatsApp.
+    dispatchToChannel(conversationId, result.content).catch((err) => {
+      console.error('[WhatsApp Webhook] Auto-reply delivery failed:', err)
+    })
+  } catch (err) {
+    console.error('[WhatsApp Webhook] Auto-reply failed:', err)
+  }
+}
+
+// Process incoming WhatsApp message and store in database.
+// Returns the conversation ID (used by the auto-reply hook).
 async function processWhatsAppMessage(data: {
   from: string
   messageId: string
@@ -148,14 +187,14 @@ async function processWhatsAppMessage(data: {
     wa_id: string
     name: string
   }
-}) {
+}): Promise<string | null> {
   // 1. Find the WhatsApp channel
   const channels = await db.channel.findMany({ where: { type: 'whatsapp', isActive: true } })
   let channel = channels[0]
 
   if (!channel) {
     console.log('[WhatsApp Webhook] No active WhatsApp channel found, skipping message')
-    return
+    return null
   }
 
   // 2. Find or create customer by phone number
@@ -253,6 +292,8 @@ async function processWhatsAppMessage(data: {
   })
 
   console.log(`[WhatsApp Webhook] ✅ Message stored in conversation ${conversation.id}`)
+
+  return conversation.id
 }
 
 // Update message delivery status

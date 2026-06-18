@@ -376,6 +376,148 @@ export async function analyzeSentiment(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared AI reply pipeline
+// Generates, saves, logs, and records usage for an AI reply to a conversation.
+// Used by both the /api/conversations/[id]/ai-reply route AND the webhook
+// auto-reply trigger (when aiMode === 'auto').
+// Returns the created message, AI log, and cost — or throws on AI failure.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { recordUsage, calculateCost } from './ai-usage'
+
+export interface GenerateAndSaveAIReplyResult {
+  message: {
+    id: string
+    content: string
+  }
+  aiLog: {
+    id: string
+    tokens: number
+    model: string
+    responseTime: number
+    estimatedCost: number
+  }
+  content: string
+}
+
+export async function generateAndSaveAIReply(
+  conversationId: string
+): Promise<GenerateAndSaveAIReplyResult> {
+  const conversation = await db.conversation.findUnique({
+    where: { id: conversationId },
+    include: {
+      customer: { include: { tags: true } },
+      messages: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          sender: { select: { id: true, name: true, avatar: true } },
+        },
+      },
+    },
+  })
+
+  if (!conversation) {
+    throw new Error('Conversation not found')
+  }
+
+  if (conversation.aiMode === 'human') {
+    throw new Error('AI replies are disabled for this conversation (human mode)')
+  }
+
+  const conversationHistory = conversation.messages
+    .map((m) => `${m.senderType}: ${m.content}`)
+    .join('\n')
+
+  const recentMessages = conversation.messages.slice(-10).map((m) => ({
+    role: m.senderType === 'customer' ? 'user' : 'assistant',
+    content: m.content,
+  }))
+
+  const aiSettings = await getAISettings()
+
+  const lastCustomerMessage =
+    conversation.messages.filter((m) => m.senderType === 'customer').pop()?.content || ''
+
+  const knowledgeContext = await getKnowledgeContext(lastCustomerMessage)
+
+  const aiResponse = await generateAIResponse({
+    messages: recentMessages,
+    customerName: conversation.customer.name,
+    knowledgeContext,
+    conversationHistory,
+    temperature: aiSettings.aiTemperature,
+    maxTokens: aiSettings.aiMaxTokens,
+  })
+
+  const message = await db.message.create({
+    data: {
+      conversationId,
+      content: aiResponse.content,
+      senderType: 'ai',
+      contentType: 'text',
+      metadata: JSON.stringify({ model: aiResponse.model, tokens: aiResponse.tokens }),
+    },
+    include: {
+      sender: { select: { id: true, name: true, avatar: true } },
+    },
+  })
+
+  const promptTokens = Math.round(aiResponse.tokens * 0.6)
+  const completionTokens = aiResponse.tokens - promptTokens
+  const estimatedCost = calculateCost(
+    aiResponse.provider,
+    aiResponse.model,
+    promptTokens,
+    completionTokens
+  )
+
+  const aiLog = await db.aiLog.create({
+    data: {
+      conversationId,
+      messageId: message.id,
+      prompt: conversationHistory.slice(-1000),
+      response: aiResponse.content,
+      tokens: aiResponse.tokens,
+      promptTokens,
+      completionTokens,
+      model: aiResponse.model,
+      provider: aiResponse.provider,
+      responseTime: aiResponse.responseTime,
+      estimatedCost,
+    },
+  })
+
+  await recordUsage({
+    provider: aiResponse.provider,
+    model: aiResponse.model,
+    promptTokens,
+    completionTokens,
+    totalTokens: aiResponse.tokens,
+    responseTime: aiResponse.responseTime,
+  })
+
+  await db.conversation.update({
+    where: { id: conversationId },
+    data: {
+      lastMessage: aiResponse.content,
+      lastMessageAt: new Date(),
+    },
+  })
+
+  return {
+    message,
+    aiLog: {
+      id: aiLog.id,
+      tokens: aiLog.tokens,
+      model: aiLog.model,
+      responseTime: aiLog.responseTime,
+      estimatedCost,
+    },
+    content: aiResponse.content,
+  }
+}
+
 // Summarize a conversation
 export async function summarizeConversation(messages: string): Promise<string> {
   const formattedMessages = [

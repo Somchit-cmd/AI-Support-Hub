@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { dispatchToChannel } from '@/lib/channels'
 
 export async function GET(
   request: Request,
@@ -85,6 +86,17 @@ export async function POST(
         lastMessageAt: new Date(),
       },
     })
+
+    // Deliver to the external channel (Facebook/WhatsApp).
+    // Only outbound, non-internal messages from agent/ai need delivery.
+    // Fire-and-forget so a channel failure doesn't roll back the saved message.
+    const shouldDeliver =
+      !isInternal && (senderType === 'agent' || senderType === undefined || senderType === 'ai')
+    if (shouldDeliver) {
+      dispatchToChannel(id, content, { existingMessageId: message.id }).catch((err) => {
+        console.error('[Messages POST] Channel dispatch failed:', err)
+      })
+    }
 
     return NextResponse.json({ message }, { status: 201 })
   } catch (error) {

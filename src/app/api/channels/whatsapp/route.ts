@@ -14,6 +14,7 @@ export async function POST(request: Request) {
       businessName,
       verifyToken,
       wabaId,
+      appSecret,
     } = body
 
     if (!phoneNumberId || !whatsappAccessToken) {
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
       businessName: businessName || '',
       wabaId: wabaId || businessAccountId || '',
       verifyToken: verifyToken || 'ai_support_hub_verify_token',
+      appSecret: appSecret || '',
       isConnected: isValid,
       connectedAt: new Date().toISOString(),
     }
@@ -96,6 +98,15 @@ export async function POST(request: Request) {
       update: { value: whatsappAccessToken },
       create: { key: 'whatsapp_access_token', value: whatsappAccessToken, category: 'channels' },
     })
+
+    // Persist the Meta app secret for webhook signature verification.
+    if (appSecret) {
+      await db.setting.upsert({
+        where: { key: 'meta_app_secret' },
+        update: { value: appSecret },
+        create: { key: 'meta_app_secret', value: appSecret, category: 'channels' },
+      })
+    }
 
     return NextResponse.json({
       channel,
