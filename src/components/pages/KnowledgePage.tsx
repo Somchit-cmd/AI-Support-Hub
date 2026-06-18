@@ -104,6 +104,35 @@ export default function KnowledgePage() {
     }
   }
 
+  // Real file upload: PDF / DOCX / TXT are parsed server-side.
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const handleFileUpload = async () => {
+    if (!uploadedFile) return
+    setIsUploading(true)
+    setUploadError(null)
+    try {
+      const form = new FormData()
+      form.append('file', uploadedFile)
+      form.append('name', uploadedFile.name.replace(/\.[^.]+$/, ''))
+      const res = await fetch('/api/knowledge', { method: 'POST', body: form })
+      if (res.ok) {
+        setShowAddDoc(false)
+        setUploadedFile(null)
+        fetchKnowledge()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setUploadError(data.error || 'Upload failed')
+      }
+    } catch {
+      setUploadError('Network error during upload')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
   const handleDeleteDocument = async (id: string) => {
     try {
       await fetch(`/api/knowledge/documents/${id}`, { method: 'DELETE' })
@@ -241,6 +270,28 @@ export default function KnowledgePage() {
                     <div className="space-y-2">
                       <Label>Document Name</Label>
                       <Input value={newDoc.name} onChange={(e) => setNewDoc({ ...newDoc, name: e.target.value })} placeholder="e.g. Company Policies" />
+                    </div>
+                    {/* Real file upload: parsed server-side */}
+                    <div className="space-y-2">
+                      <Label>Upload a file (PDF / DOCX / TXT)</Label>
+                      <Input
+                        type="file"
+                        accept=".pdf,.docx,.doc,.txt,.md,.html"
+                        onChange={(e) => setUploadedFile(e.target.files?.[0] || null)}
+                      />
+                      {uploadedFile && (
+                        <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-muted">
+                          <span className="text-xs truncate flex-1">{uploadedFile.name} ({Math.round(uploadedFile.size / 1024)} KB)</span>
+                          <Button size="sm" onClick={handleFileUpload} disabled={isUploading} className="bg-slate-900 hover:bg-slate-800">
+                            {isUploading ? 'Parsing...' : 'Parse & Save'}
+                          </Button>
+                        </div>
+                      )}
+                      {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
+                    </div>
+                    <div className="relative py-1">
+                      <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-border" /></div>
+                      <span className="relative bg-background px-2 text-[10px] uppercase text-muted-foreground mx-auto">or paste text / URL</span>
                     </div>
                     <div className="space-y-2">
                       <Label>Type</Label>

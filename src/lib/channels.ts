@@ -3,6 +3,7 @@
 // This module should ONLY be used in backend (API routes).
 
 import { db } from '@/lib/db'
+import { notifyWidgetMessage } from '@/lib/realtime'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -206,8 +207,19 @@ export async function dispatchToChannel(
     return { success: false, error: 'No channel configured' }
   }
 
-  // Website chat has no external delivery target yet.
+  // Website chat: no external API call needed (the widget polls or streams).
+  // Instead, push a real-time event so any connected widget receives the reply
+  // instantly over the SSE stream.
   if (channelInfo.type === 'website') {
+    if (options?.existingMessageId) {
+      notifyWidgetMessage(conversationId, {
+        id: options.existingMessageId,
+        content: messageText,
+        senderType: 'agent', // set by caller context; kept generic here
+        contentType: 'text',
+        createdAt: new Date(),
+      })
+    }
     return { success: true }
   }
 

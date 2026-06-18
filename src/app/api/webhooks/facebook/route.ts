@@ -3,6 +3,8 @@ import { db } from '@/lib/db'
 import { isWebhookAuthorized } from '@/lib/webhook-security'
 import { generateAndSaveAIReply } from '@/lib/ai'
 import { dispatchToChannel } from '@/lib/channels'
+import { runRules } from '@/lib/automation'
+import { processInboundSentiment } from '@/lib/sentiment'
 
 // Facebook Webhook Verification (GET)
 // When you configure your webhook in Facebook Developer Portal,
@@ -243,6 +245,12 @@ async function processFacebookMessage(data: {
       },
     })
     console.log(`[Facebook Webhook] ✅ Created new conversation: ${conversation.id}`)
+    // Fire new_conversation automation rules.
+    runRules('new_conversation', {
+      conversationId: conversation.id,
+      customerId: customer.id,
+      channelType: 'facebook',
+    }).catch((e) => console.error('[Facebook Webhook] new_conversation rules failed:', e))
   }
 
   // 4. Store the message
@@ -284,6 +292,18 @@ async function processFacebookMessage(data: {
   })
 
   console.log(`[Facebook Webhook] ✅ Message stored in conversation ${conversation.id}`)
+
+  // Background enrichment: sentiment analysis + automation rules.
+  // These never block the webhook response.
+  processInboundSentiment(customer.id, data.messageText, 'facebook').catch((e) =>
+    console.error('[Facebook Webhook] sentiment failed:', e)
+  )
+  runRules('keyword_match', {
+    conversationId: conversation.id,
+    customerId: customer.id,
+    channelType: 'facebook',
+    messageContent: data.messageText,
+  }).catch((e) => console.error('[Facebook Webhook] rules failed:', e))
 
   return conversation.id
 }

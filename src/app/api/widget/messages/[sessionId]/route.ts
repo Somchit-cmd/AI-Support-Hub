@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { generateAndSaveAIReply } from '@/lib/ai'
+import { runRules } from '@/lib/automation'
+import { processInboundSentiment } from '@/lib/sentiment'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public widget endpoints, scoped by sessionId (= conversation id).
@@ -18,7 +20,11 @@ import { generateAndSaveAIReply } from '@/lib/ai'
 async function loadConversation(sessionId: string) {
   return db.conversation.findUnique({
     where: { id: sessionId },
-    include: {
+    select: {
+      id: true,
+      status: true,
+      aiMode: true,
+      customerId: true,
       channel: { select: { type: true, isActive: true } },
     },
   })
@@ -121,6 +127,17 @@ export async function POST(
         unreadCount: { increment: 1 },
       },
     })
+
+    // Background enrichment (never blocks the visitor's response).
+    if (conversation.customerId) {
+      processInboundSentiment(conversation.customerId, content.trim(), 'website').catch(() => {})
+      runRules('keyword_match', {
+        conversationId: sessionId,
+        customerId: conversation.customerId,
+        channelType: 'website',
+        messageContent: content.trim(),
+      }).catch(() => {})
+    }
 
     // Auto-reply with AI if the conversation is in auto mode.
     let aiReply: { id: string; content: string } | null = null

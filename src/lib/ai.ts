@@ -408,6 +408,7 @@ export async function generateAndSaveAIReply(
     where: { id: conversationId },
     include: {
       customer: { include: { tags: true } },
+      channel: { select: { type: true } },
       messages: {
         orderBy: { createdAt: 'asc' },
         include: {
@@ -504,6 +505,22 @@ export async function generateAndSaveAIReply(
       lastMessageAt: new Date(),
     },
   })
+
+  // Push the AI reply to any connected website widget in real time.
+  if (conversation.channel?.type === 'website') {
+    try {
+      const { notifyWidgetMessage } = await import('@/lib/realtime')
+      notifyWidgetMessage(conversationId, {
+        id: message.id,
+        content: aiResponse.content,
+        senderType: 'ai',
+        contentType: 'text',
+        createdAt: message.createdAt,
+      })
+    } catch {
+      // realtime module unavailable — non-critical
+    }
+  }
 
   return {
     message,

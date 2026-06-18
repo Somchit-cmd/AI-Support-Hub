@@ -43,12 +43,10 @@ No route checks the caller's identity or role. Any caller can read/write any cus
 
 **Resolved.** Both webhooks now call `maybeAutoReply(conversationId)` after storing an inbound message. If the conversation's `aiMode === 'auto'`, it runs the shared `generateAndSaveAIReply()` pipeline and dispatches the AI reply back to the channel. The AI reply logic was extracted from the route into a shared function so manual (suggest) and automatic (auto) paths use identical code.
 
-### 🟡 Automation rules are never executed
-**Files:** [`src/app/api/automation/route.ts`](../src/app/api/automation/route.ts), [`prisma/schema.prisma`](../prisma/schema.prisma) (`AutomationRule`)
+### 🟡 Automation engine ✅
+**Files:** [`src/lib/automation.ts`](../src/lib/automation.ts), [`src/app/api/automation/run/route.ts`](../src/app/api/automation/run/route.ts)
 
-Rules can be created, listed, toggled, and deleted, but **no engine evaluates them** against events (`new_conversation`, `keyword_match`, `sentiment_change`, `inactivity`). The UI is purely CRUD over stored rules.
-
-Fix: build a rule evaluator that runs on conversation/message events and dispatches actions (set priority, assign, auto-respond, etc.).
+**Resolved.** A rule engine now evaluates active rules against events. Triggers: `new_conversation`, `keyword_match`, `sentiment_change`, `inactivity`. Actions: `setPriority`, `assignToAgentId`/`assignToRole`, `addTag`, `sendNote`, `sendMessage`, `closeConversation`. The engine runs automatically from both webhooks (FB/WA/website) on message/conversation events. The `inactivity` trigger is driven by `GET /api/automation/run?token=<AUTOMATION_CRON_TOKEN>` — call it from an external cron (Vercel Cron, cron-job.org) hourly. Set `AUTOMATION_CRON_TOKEN` in `.env` to enable.
 
 ### 🟡 Website widget is not implemented
 **Files:** [`src/components/pages/SettingsPage.tsx`](../src/components/pages/SettingsPage.tsx) (embed snippet)
@@ -57,28 +55,22 @@ Settings → Channels shows an embed snippet (`<script src="/widget.js">`), but 
 
 Fix: add a public `/widget` route + embedded script + customer-side chat UI; wire it to create conversations on the `website` channel (optionally via the Socket.IO service).
 
-### 🟡 Socket.IO not wired in
-**Files:** [`mini-services/chat-service/index.ts`](../mini-services/chat-service/index.ts), [`src/hooks/use-socket.ts`](../src/hooks/use-socket.ts), [`src/components/chat/*`](../src/components/chat), [`src/components/inbox/*`](../src/components/inbox)
+### 🟡 Real-time delivery for the website widget ✅ (SSE chosen over Socket.IO)
+**Files:** [`src/lib/realtime.ts`](../src/lib/realtime.ts), [`src/app/api/widget/stream/[sessionId]/route.ts`](../src/app/api/widget/stream/[sessionId]/route.ts), [`public/widget.js`](../public/widget.js)
 
-- A standalone Socket.IO server exists (port 3003) and a client hook exists, but **the running `InboxPage` doesn't use them** — it polls via REST on conversation selection.
-- The modular chat/inbox components (`src/components/chat/*`, `src/components/inbox/*`) were built for Socket.IO but are **orphaned** (not imported by `AppShell` or `InboxPage`).
-- Type mismatch: `useSocket` returns `{ getSocket, isConnected }` but `ChatWindow.tsx` destructures `{ emit, on, off }` — would crash if used as-is.
+**Resolved** for the customer-facing widget. Instead of wiring the half-broken Socket.IO service, a lightweight in-process event bus + Server-Sent Events stream pushes agent/AI/automation messages to the widget **instantly** (no polling). The widget.js opens an `EventSource` and auto-falls back to 4s polling if a proxy blocks SSE. Agent/AI reply paths call `notifyWidgetMessage()` to publish. **Limitation:** per-process state (single-server only). For multi-instance deploys, swap the `Map` in `realtime.ts` for Redis pub/sub — the public API stays the same.
 
-Fix: either (a) wire the existing service into `InboxPage` (fix the hook API mismatch, emit/subscribe to the right events), or (b) switch to Next.js-native Server-Sent Events for simpler ops.
+> The internal staff `InboxPage` still uses REST polling (the orphaned Socket.IO components remain unused). Real-time for the admin inbox is a separate future task.
 
-### 🟡 Sentiment is never analyzed
-**Files:** [`src/lib/ai.ts`](../src/lib/ai.ts) (`analyzeSentiment` defined but unused), [`src/app/api/dashboard/route.ts`](../src/app/api/dashboard/route.ts), [`src/components/pages/CustomersPage.tsx`](../src/components/pages/CustomersPage.tsx)
+### 🟡 Sentiment analysis ✅
+**Files:** [`src/lib/sentiment.ts`](../src/lib/sentiment.ts), [`src/app/api/webhooks/{facebook,whatsapp}/route.ts`](../src/app/api/webhooks/facebook/route.ts), [`src/app/api/widget/messages/[sessionId]/route.ts`](../src/app/api/widget/messages/[sessionId]/route.ts)
 
-The Dashboard shows a "Customer Sentiment" chart and Customers show sentiment badges, but sentiment is always the default `neutral` — `analyzeSentiment` exists in `ai.ts` but is called **nowhere**. The same applies to `detectLanguage`, `summarizeConversation`, and `generateSuggestedReplies` (all defined, all unused).
+**Resolved.** Inbound customer messages are now scored for sentiment via a multilingual (EN/TH/LAO) keyword heuristic — no AI call, no cost, instant. The customer's `sentiment` field is updated whenever it changes, and the change fires the `sentiment_change` automation trigger. Runs in the background from all three inbound paths (FB, WA, website widget).
 
-Fix: call `analyzeSentiment` on incoming customer messages (in the webhook or message-create flow) and update `Customer.sentiment`.
+### 🟡 Knowledge upload now parses real files ✅
+**Files:** [`src/lib/document-parser.ts`](../src/lib/document-parser.ts), [`src/app/api/knowledge/route.ts`](../src/app/api/knowledge/route.ts), [`src/components/pages/KnowledgePage.tsx`](../src/components/pages/KnowledgePage.tsx)
 
-### 🟡 Knowledge "upload" is paste-only
-**Files:** [`src/app/api/knowledge/route.ts`](../src/app/api/knowledge/route.ts), [`src/components/pages/KnowledgePage.tsx`](../src/components/pages/KnowledgePage.tsx)
-
-Documents are added by pasting text into a dialog; the `type` field (pdf/docx/txt/url) is just a label. **No actual file parsing or URL fetching** happens.
-
-Fix: accept file uploads and parse PDF/DOCX (e.g. with `pdf-parse`, `mammoth`), or fetch URL content server-side.
+**Resolved.** The Knowledge Base now accepts real file uploads (`multipart/form-data`) parsed server-side via `pdfjs-dist` (PDF), `mammoth` (DOCX), and plain-text. Pasting a URL with `type: url` also fetches and extracts page content. The KnowledgePage upload dialog has a file picker for PDF/DOCX/TXT/MD/HTML in addition to the paste-text fallback. Extracted text is capped at 100k chars.
 
 ---
 
@@ -118,11 +110,11 @@ This list was verified against the source as of the documentation pass. If you f
 - [ ] API route authorization (role checks)
 - [x] Inbox replies forwarded to FB/WhatsApp
 - [x] AI auto-mode triggered on inbound messages
-- [ ] Automation rule engine
-- [ ] Website live-chat widget
-- [ ] Real-time updates wired into Inbox (Socket.IO or SSE)
-- [ ] Sentiment analysis on inbound messages
-- [ ] Real document parsing in Knowledge Base
+- [x] Automation rule engine
+- [x] Website live-chat widget
+- [x] Real-time widget delivery (SSE) — admin Inbox still polls
+- [x] Sentiment analysis on inbound messages
+- [x] Real document parsing in Knowledge Base
 - [ ] Fix broken `/api/ai/test` → `/api/ai/test-provider` button
 - [ ] Implement attach / emoji in chat composer
 - [ ] Consolidate duplicated inbox components
@@ -135,6 +127,10 @@ This list was verified against the source as of the documentation pass. If you f
 - **Agent replies reach FB/WhatsApp** (2026-06-18) — `dispatchToChannel()` in messages POST route + shared send helpers in `src/lib/channels.ts`.
 - **AI auto-mode triggers on inbound messages** (2026-06-18) — `maybeAutoReply()` in both webhooks; shared `generateAndSaveAIReply()` extracted to `src/lib/ai.ts`.
 - **Webhook signature verification** (2026-06-18) — `verifyMetaSignature()` in `src/lib/webhook-security.ts`; opt-in via `meta_app_secret` setting (set in connect wizard). Skipped with a warning when no secret is configured.
+- **Automation rule engine** (2026-06-18) — `src/lib/automation.ts` evaluates triggers (new_conversation, keyword_match, sentiment_change, inactivity) and dispatches actions; wired into all three inbound paths. `inactivity` runs via `/api/automation/run?token=`.
+- **Sentiment analysis** (2026-06-18) — `src/lib/sentiment.ts` scores inbound messages (EN/TH/LAO keyword heuristic), updates `Customer.sentiment`, and fires the `sentiment_change` automation rule.
+- **Real-time widget delivery** (2026-06-18) — `src/lib/realtime.ts` in-process bus + SSE stream `/api/widget/stream/[sessionId]`; `widget.js` uses EventSource with polling fallback.
+- **Real document parsing** (2026-06-18) — `src/lib/document-parser.ts` (pdfjs-dist + mammoth + URL fetch); knowledge route accepts `multipart/form-data` uploads and URL import.
 
 ---
 

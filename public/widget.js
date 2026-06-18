@@ -29,8 +29,9 @@
   APP_URL = APP_URL.replace(/\/+$/, ''); // trim trailing slash
 
   var SESSION_KEY = '__ash_widget_session__';
-  var POLL_INTERVAL = 4000; // 4 seconds
+  var POLL_INTERVAL = 4000; // 4 seconds (fallback when SSE unavailable)
   var pollTimer = null;
+  var eventSource = null; // SSE connection for real-time delivery
 
   // ----------------------------------------------------------------
   // Helpers
@@ -282,13 +283,56 @@
   }
 
   // ----------------------------------------------------------------
-  // Polling
+  // Real-time delivery (SSE) + polling fallback
   // ----------------------------------------------------------------
+  // Prefer Server-Sent Events for instant delivery. If the browser (or a
+  // proxy) blocks SSE, fall back to polling every few seconds.
   function startPolling() {
     stopPolling();
+    if (typeof EventSource !== 'undefined' && state.sessionId) {
+      openStream();
+      return;
+    }
     pollTimer = setInterval(loadMessages, POLL_INTERVAL);
   }
+
+  function openStream() {
+    try {
+      eventSource = new EventSource(APP_URL + '/api/widget/stream/' + state.sessionId);
+      eventSource.onmessage = function (ev) {
+        try {
+          var payload = JSON.parse(ev.data);
+          if (!payload) return;
+          if (payload.type === 'message' && payload.message) {
+            mergeMessages([payload.message]);
+            renderMessages();
+            // Keep the watermark current so a re-poll won't replay it.
+            state.lastPollAt = payload.message.createdAt || new Date().toISOString();
+          } else if (payload.type === 'session_closed') {
+            stopPolling();
+          }
+        } catch (e) { /* ignore malformed */ }
+      };
+      eventSource.onerror = function () {
+        // SSE failed (proxy/network) — fall back to polling.
+        closeStream();
+        if (!pollTimer) pollTimer = setInterval(loadMessages, POLL_INTERVAL);
+      };
+    } catch (e) {
+      // EventSource unavailable — fall back to polling.
+      if (!pollTimer) pollTimer = setInterval(loadMessages, POLL_INTERVAL);
+    }
+  }
+
+  function closeStream() {
+    if (eventSource) {
+      try { eventSource.close(); } catch (e) {}
+      eventSource = null;
+    }
+  }
+
   function stopPolling() {
+    closeStream();
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
