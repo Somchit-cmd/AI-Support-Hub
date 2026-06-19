@@ -1908,8 +1908,12 @@ export default function SettingsPage() {
                     </p>
                     <div className="bg-slate-50 rounded-lg p-3">
                       <div className="flex items-end gap-[2px] h-24">
-                        {aiStats.usage.month.daily.map((day, i) => {
-                          const maxTokens = Math.max(...aiStats.usage.month!.daily.map(d => d.totalTokens), 1)
+                        {aiStats.usage?.month?.daily?.length ? (
+                          <>
+                          {(() => {
+                          const daily = aiStats.usage!.month!.daily
+                          const maxTokens = Math.max(...daily.map(d => d.totalTokens), 1)
+                          return daily.map((day, i) => {
                           const height = maxTokens > 0 ? (day.totalTokens / maxTokens) * 100 : 0
                           return (
                             <div
@@ -1920,7 +1924,7 @@ export default function SettingsPage() {
                               <div
                                 className={cn(
                                   'w-full rounded-t transition-all duration-200',
-                                  i === aiStats.usage.month!.daily.length - 1
+                                  i === daily.length - 1
                                     ? 'bg-slate-900'
                                     : 'bg-slate-300 hover:bg-slate-400'
                                 )}
@@ -1937,7 +1941,12 @@ export default function SettingsPage() {
                               </div>
                             </div>
                           )
-                        })}
+                          })
+                          })()}
+                          </>
+                        ) : (
+                          <div className="text-xs text-muted-foreground py-8 text-center">No usage data yet</div>
+                        )}
                       </div>
                       <div className="flex justify-between mt-1.5 text-[10px] text-muted-foreground">
                         <span>30 days ago</span>

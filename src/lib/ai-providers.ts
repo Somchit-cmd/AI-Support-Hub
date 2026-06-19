@@ -5,7 +5,7 @@
 import ZAI from 'z-ai-web-dev-sdk'
 import OpenAI from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import Anthropic, { TextBlock } from '@anthropic-ai/sdk'
+import Anthropic from '@anthropic-ai/sdk'
 import { db } from '@/lib/db'
 
 // ============================================
@@ -383,8 +383,8 @@ async function generateWithAnthropic(
   })
 
   const textContent = completion.content
-    .filter((block): block is TextBlock => block.type === 'text')
-    .map((block) => block.text)
+    .filter((block) => block.type === 'text')
+    .map((block) => (block as { text: string }).text)
     .join('\n')
 
   return {
@@ -544,8 +544,8 @@ export async function testProviderConnection(config: AIProviderConfig): Promise<
           messages: [{ role: 'user', content: 'Respond with exactly: "Connection successful!"' }],
         })
         const text = response.content
-          .filter((block): block is TextBlock => block.type === 'text')
-          .map((block) => block.text)
+          .filter((block) => block.type === 'text')
+          .map((block) => (block as { text: string }).text)
           .join('')
         result = {
           content: text,

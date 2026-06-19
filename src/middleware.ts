@@ -10,10 +10,8 @@ import type { NextRequest } from 'next/server'
 // widget can call it — not arbitrary sites in a CSRF sense; for tighter
 // control you can restrict to a configured allowlist of domains).
 
-export function config() {
-  return {
-    matcher: ['/api/widget/:path*'],
-  }
+export const config = {
+  matcher: ['/api/widget/:path*'],
 }
 
 export function middleware(request: NextRequest) {
