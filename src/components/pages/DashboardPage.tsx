@@ -28,7 +28,7 @@ interface DashboardData {
   conversationsByChannel: { type: string; count: number }[]
   messagesByDay: { date: string; count: number }[]
   sentimentDistribution: { sentiment: string; count: number }[]
-  topAgents: { name: string; conversations: number }[]
+  topAgents: { name: string; assignedConversations: number }[]
 }
 
 const statCards = [
@@ -60,10 +60,6 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  useEffect(() => {
-    fetchDashboard()
-  }, [])
-
   const fetchDashboard = async () => {
     setIsLoading(true)
     try {
@@ -78,6 +74,10 @@ export default function DashboardPage() {
       setIsLoading(false)
     }
   }
+
+  useEffect(() => {
+    fetchDashboard()
+  }, [])
 
   const channelData = (data?.conversationsByChannel || []).map(c => ({
     name: c.type.charAt(0).toUpperCase() + c.type.slice(1),
@@ -308,7 +308,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium">{agent.name}</p>
-                      <p className="text-xs text-muted-foreground">{agent.conversations} conversations</p>
+                      <p className="text-xs text-muted-foreground">{agent.assignedConversations} conversations</p>
                     </div>
                     <Badge variant="secondary" className="text-xs">Active</Badge>
                   </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { toJsonString } from '@/lib/automation'
 
 export async function GET() {
   try {
@@ -30,8 +31,10 @@ export async function POST(request: Request) {
       data: {
         name,
         trigger,
-        conditions: conditions ? JSON.stringify(conditions) : '{}',
-        actions: actions ? JSON.stringify(actions) : '{}',
+        // toJsonString prevents the double-encode that happened when the UI
+        // sent an already-stringified '{}' value (it became '"{}"' before).
+        conditions: toJsonString(conditions),
+        actions: toJsonString(actions),
         isActive: isActive !== undefined ? isActive : true,
       },
     })

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { toJsonString } from '@/lib/automation'
 
 export async function PATCH(
   request: Request,
@@ -18,8 +19,8 @@ export async function PATCH(
     const updateData: Record<string, unknown> = {}
     if (name !== undefined) updateData.name = name
     if (trigger !== undefined) updateData.trigger = trigger
-    if (conditions !== undefined) updateData.conditions = JSON.stringify(conditions)
-    if (actions !== undefined) updateData.actions = JSON.stringify(actions)
+    if (conditions !== undefined) updateData.conditions = toJsonString(conditions)
+    if (actions !== undefined) updateData.actions = toJsonString(actions)
     if (isActive !== undefined) updateData.isActive = isActive
 
     const rule = await db.automationRule.update({

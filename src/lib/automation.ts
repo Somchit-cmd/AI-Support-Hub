@@ -281,3 +281,36 @@ function parseJSON<T = unknown>(raw: string | null | undefined): T {
     return {} as T
   }
 }
+
+/**
+ * Normalize an incoming conditions/actions field to a canonical JSON string.
+ *
+ * The UI sends raw user-typed text (e.g. `'{}'` or `'{"keywords":["x"]}'`),
+ * while programmatic API callers may send objects. Without normalization,
+ * calling `JSON.stringify` on an already-string value double-encodes it
+ * (`'{}'` → `'"{ }"'`), which the engine then fails to parse. This helper
+ * accepts either form (string | object | null) and always returns a clean
+ * JSON string of the underlying object.
+ */
+export function toJsonString(value: unknown): string {
+  if (value == null) return '{}'
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return '{}'
+    // Already a JSON string — parse then re-stringify to canonicalize.
+    try {
+      const parsed = JSON.parse(trimmed)
+      return JSON.stringify(parsed)
+    } catch {
+      // Not valid JSON (e.g. user typed plain text) — wrap as a string value
+      // so at least it round-trips without corrupting.
+      return JSON.stringify({ value: trimmed })
+    }
+  }
+  // Object form.
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return '{}'
+  }
+}

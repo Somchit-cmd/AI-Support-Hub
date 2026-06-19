@@ -207,9 +207,9 @@
       }
       state.sessionId = res.data.sessionId;
       saveSession(state.sessionId);
-      if (res.data.welcomeMessage) {
-        state.messages.push({ id: 'welcome', content: res.data.welcomeMessage, senderType: 'system' });
-      }
+      // Don't push a synthetic welcome here — the session route also persists
+      // it as a real message, so loadMessages() will fetch it (avoids showing
+      // the welcome bubble twice).
       loadMessages();
       startPolling();
     }).catch(function () {

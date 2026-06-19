@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
-import { useAppStore, useAuthStore, AppPage } from '@/lib/store'
+import { useAppStore, useAuthStore, useConversationStore, useNotificationStore, AppPage } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -11,6 +11,7 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import {
   MessageSquare,
   BarChart3,
@@ -55,6 +56,10 @@ const pageVariants = {
 
 function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate: () => void }) {
   const { currentPage, setCurrentPage } = useAppStore()
+  // Live unread badge — derived from the conversation store (kept fresh by the
+  // InboxPage SSE stream). Was a hardcoded `6` before.
+  const conversations = useConversationStore((s) => s.conversations)
+  const unreadCount = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0)
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -87,9 +92,9 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate:
                   {item.label}
                 </motion.span>
               )}
-              {!collapsed && item.page === 'inbox' && (
+              {!collapsed && item.page === 'inbox' && unreadCount > 0 && (
                 <Badge className="ml-auto bg-emerald-500 text-white text-[10px] h-5 min-w-5 flex items-center justify-center px-1.5">
-                  6
+                  {unreadCount > 99 ? '99+' : unreadCount}
                 </Badge>
               )}
             </button>
@@ -114,8 +119,28 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate:
 export default function AppShell() {
   const { sidebarCollapsed, toggleSidebar, currentPage, theme, setTheme } = useAppStore()
   const { user, logout } = useAuthStore()
-  const [notificationCount] = useState(3)
+  // Real unread count derived from the conversation store (kept in sync by the
+  // InboxPage via the SSE stream). Was a hardcoded `3` / sidebar `6` before.
+  const conversations = useConversationStore((s) => s.conversations)
+  const fetchConversations = useConversationStore((s) => s.fetchConversations)
+  const unreadCount = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0)
+
+  const { notifications, unreadCount: notifUnread, fetchNotifications } = useNotificationStore()
+  const [showNotifications, setShowNotifications] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Load conversations + notifications once on mount so the badges are live.
+  useEffect(() => {
+    fetchConversations()
+    fetchNotifications()
+  }, [fetchConversations, fetchNotifications])
+
+  // Refresh on focus so a tab left open catches up.
+  useEffect(() => {
+    const onFocus = () => { fetchConversations(); fetchNotifications() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [fetchConversations, fetchNotifications])
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -253,14 +278,47 @@ export default function AppShell() {
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
 
-          <Button variant="ghost" size="icon" className="h-9 w-9 relative">
-            <Bell className="h-4 w-4" />
-            {notificationCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-destructive text-[10px] text-white flex items-center justify-center font-bold">
-                {notificationCount}
-              </span>
-            )}
-          </Button>
+          <DropdownMenu open={showNotifications} onOpenChange={setShowNotifications}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9 relative">
+                <Bell className="h-4 w-4" />
+                {notifUnread > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-destructive text-[10px] text-white flex items-center justify-center font-bold">
+                    {notifUnread > 99 ? '99+' : notifUnread}
+                  </span>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-80">
+              <div className="flex items-center justify-between px-2 py-1.5">
+                <span className="text-sm font-semibold">Notifications</span>
+                {notifUnread > 0 && (
+                  <button
+                    className="text-xs text-primary hover:underline"
+                    onClick={() => useNotificationStore.getState().markAllRead()}
+                  >
+                    Mark all read
+                  </button>
+                )}
+              </div>
+              <DropdownMenuSeparator />
+              {notifications.length === 0 ? (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  No notifications
+                </div>
+              ) : (
+                notifications.slice(0, 8).map((n) => (
+                  <DropdownMenuItem key={n.id} className="flex-col items-start py-2" onClick={() => useNotificationStore.getState().markRead(n.id)}>
+                    <div className="flex items-center gap-2 w-full">
+                      {!n.isRead && <span className="h-2 w-2 rounded-full bg-primary shrink-0" />}
+                      <span className="text-sm font-medium truncate">{n.title}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <Separator orientation="vertical" className="h-6" />
 

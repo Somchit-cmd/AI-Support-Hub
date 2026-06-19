@@ -1,6 +1,18 @@
 import { NextResponse } from 'next/server'
-import { generateAndSaveAIReply } from '@/lib/ai'
+import { db } from '@/lib/db'
+import { generateAndSaveAIReply, generateSuggestedReplies, getAISettings } from '@/lib/ai'
 import { dispatchToChannel } from '@/lib/channels'
+
+// POST /api/conversations/[id]/ai-reply
+//
+// Two modes:
+//   { }                       → AI Reply: generate, SAVE the message, log usage,
+//                               and dispatch it to the channel (FB/WA/website).
+//   { suggestOnly: true }     → AI Suggest: generate reply OPTIONS ONLY, do NOT
+//                               save anything or contact the customer. Returns
+//                               { suggestions: string[] } for the agent to pick
+//                               from. Sending the chosen text is a separate
+//                               agent action via the messages endpoint.
 
 export async function POST(
   request: Request,
@@ -8,8 +20,54 @@ export async function POST(
 ) {
   try {
     const { id } = await params
+    let body: { suggestOnly?: boolean } = {}
+    try {
+      body = await request.json()
+    } catch {
+      // Empty body is fine for the AI Reply path.
+    }
 
-    // Generate, save, log, and record usage (shared pipeline).
+    // ── AI Suggest: no persistence, no dispatch ──────────────────────────
+    if (body.suggestOnly) {
+      const conversation = await db.conversation.findUnique({
+        where: { id },
+        include: {
+          customer: { select: { name: true } },
+          messages: {
+            orderBy: { createdAt: 'asc' },
+            take: 10,
+            select: { senderType: true, content: true },
+          },
+        },
+      })
+      if (!conversation) {
+        return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+      }
+      if (conversation.aiMode === 'human') {
+        return NextResponse.json(
+          { error: 'AI is disabled for this conversation (human mode)' },
+          { status: 400 }
+        )
+      }
+
+      const history = conversation.messages
+        .map((m) => `${m.senderType}: ${m.content}`)
+        .join('\n')
+      const lastMessages = conversation.messages.slice(-5).map((m) => m.content).join('\n')
+
+      // Guard usage: suggestions don't need RAG context, so skip the heavier
+      // pipeline. Returns up to 3 options.
+      await getAISettings() // ensures AI is configured; throws if misconfigured
+      const suggestions = await generateSuggestedReplies(
+        `Customer: ${conversation.customer?.name || 'Customer'}\n${history}`,
+        lastMessages,
+        3
+      )
+
+      return NextResponse.json({ suggestions })
+    }
+
+    // ── AI Reply: full pipeline (save + dispatch) ────────────────────────
     const result = await generateAndSaveAIReply(id)
 
     // Deliver the AI reply to the external channel (Facebook/WhatsApp).

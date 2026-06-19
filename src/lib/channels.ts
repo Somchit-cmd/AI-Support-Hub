@@ -81,7 +81,18 @@ export async function sendToFacebook(
   recipientPsid: string,
   messageText: string
 ): Promise<SendResult> {
-  const token = await getSetting('facebook_page_access_token')
+  // Resolve the Page Access Token the same way WhatsApp does: prefer the
+  // active channel's config JSON (where the connect wizard writes it), then
+  // fall back to the legacy `facebook_page_access_token` setting.
+  const channel = await getActiveChannel('facebook')
+  let token: string | null = null
+  if (channel) {
+    const config = parseConfig<FacebookChannelConfig>(channel.config)
+    token = config.pageAccessToken || config.accessToken || null
+  }
+  if (!token) {
+    token = await getSetting('facebook_page_access_token')
+  }
   if (!token) {
     return { success: false, error: 'Facebook Page Access Token not configured' }
   }

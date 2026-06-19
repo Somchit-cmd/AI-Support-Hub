@@ -109,8 +109,31 @@ export async function DELETE(
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
     }
 
-    // Cascade deletes will handle related records
-    await db.customer.delete({ where: { id } })
+    // Manual cascade: the schema's Conversation.customer relation has no
+    // onDelete: Cascade, so a direct customer.delete() throws a foreign-key
+    // constraint error. Delete the dependency chain first, in a transaction.
+    await db.$transaction(async (tx) => {
+      const conversationIds = await tx.conversation.findMany({
+        where: { customerId: id },
+        select: { id: true },
+      })
+      const convoIdList = conversationIds.map((c) => c.id)
+
+      if (convoIdList.length > 0) {
+        // Messages, Assignments, and AiLogs all reference conversations.
+        // Message and Assignment have onDelete: Cascade in the schema, but
+        // AiLog does not — delete explicitly to be safe across all of them.
+        await tx.message.deleteMany({ where: { conversationId: { in: convoIdList } } })
+        await tx.assignment.deleteMany({ where: { conversationId: { in: convoIdList } } })
+        await tx.aiLog.deleteMany({ where: { conversationId: { in: convoIdList } } })
+        await tx.conversation.deleteMany({ where: { id: { in: convoIdList } } })
+      }
+
+      // CustomerTag has onDelete: Cascade, but delete explicitly for safety.
+      await tx.customerTag.deleteMany({ where: { customerId: id } })
+
+      await tx.customer.delete({ where: { id } })
+    })
 
     return NextResponse.json({ message: 'Customer deleted successfully' })
   } catch (error) {

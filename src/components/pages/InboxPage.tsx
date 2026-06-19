@@ -12,7 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import ReactMarkdown from 'react-markdown'
 import { formatDistanceToNow } from 'date-fns'
@@ -240,12 +240,23 @@ function ChatWindowPanel() {
       const res = await fetch(`/api/conversations/${convId}`)
       if (res.ok) {
         const data = await res.json()
-        // API returns { conversation: { messages: [...], customer: {}, channel: {}, ... } }
+        // API returns { conversation: { messages: [...], customer: {}, channel: {}, ...} }
         const conv = data.conversation
         if (conv) {
           setMessages(conv.messages || [])
           // Also update the local conversation state with full detail (customer, channel, etc.)
           setConversation((prev) => prev ? { ...prev, ...conv } : prev)
+
+          // Mark the conversation as read (clear unread badge). Fire-and-forget
+          // so a slow network doesn't delay the message list.
+          if (conv.unreadCount && conv.unreadCount > 0) {
+            updateConversation(convId, { unreadCount: 0 })
+            fetch(`/api/conversations/${convId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ unreadCount: 0 }),
+            }).catch(() => {})
+          }
         }
       }
     } catch {
@@ -253,7 +264,7 @@ function ChatWindowPanel() {
     } finally {
       setIsLoadingMessages(false)
     }
-  }, [])
+  }, [updateConversation])
 
   // Keep conversation object in sync with store (for metadata like status, aiMode, etc.)
   // BUT do NOT reset messages from here — messages come from fetchMessages API only
@@ -266,6 +277,8 @@ function ChatWindowPanel() {
   // Replaces REST polling. New inbound messages arrive instantly. We only
   // append to the visible message list when the event is for the currently
   // open conversation; otherwise the conversation-list refresh handles it.
+  // setState inside onmessage is event-driven, not a synchronous render cascade.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     const supportsSSE = typeof window !== 'undefined' && 'EventSource' in window
     if (!supportsSSE) return
@@ -301,6 +314,10 @@ function ChatWindowPanel() {
   }, [selectedConversationId, fetchConversations])
 
   // Fetch messages when conversation is selected
+  // Clear the message list immediately on conversation switch so the previous
+  // conversation's messages don't flash while the new ones load. The clear is
+  // synchronous and intentional (not a cascade).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (selectedConversationId) {
       setMessages([]) // clear old messages immediately so stale data isn't shown
@@ -480,6 +497,96 @@ function ChatWindowPanel() {
     }
   }
 
+  // Persist Pin toggle to the backend (was local-store-only before).
+  const handleTogglePin = async () => {
+    if (!selectedConversationId || !conversation) return
+    const isPinned = !conversation.isPinned
+    updateConversation(selectedConversationId, { isPinned })
+    try {
+      await fetch(`/api/conversations/${selectedConversationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPinned }),
+      })
+    } catch {
+      // revert on failure
+      updateConversation(selectedConversationId, { isPinned: !isPinned })
+    }
+  }
+
+  // Assign the conversation to a staff member (was no UI before).
+  const [staffList, setStaffList] = useState<{ id: string; name: string; role: string }[]>([])
+  useEffect(() => {
+    fetch('/api/staff')
+      .then((r) => (r.ok ? r.json() : { staff: [] }))
+      .then((d) => setStaffList(d.staff || []))
+      .catch(() => {})
+  }, [])
+
+  const handleAssign = async (agentId: string) => {
+    if (!selectedConversationId) return
+    try {
+      await fetch(`/api/conversations/${selectedConversationId}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId }),
+      })
+      // Refresh so the assignedTo name shows up.
+      if (selectedConversationId) fetchMessages(selectedConversationId)
+    } catch {
+      // error
+    }
+  }
+
+  // Save the customer's lead status (was an empty handler before).
+  const handleLeadStatusChange = async (leadStatus: string) => {
+    const customerId = (conversation?.customer as Customer | undefined)?.id
+    if (!customerId) return
+    try {
+      await fetch(`/api/customers/${customerId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadStatus }),
+      })
+      setConversation((prev) =>
+        prev && prev.customer ? { ...prev, customer: { ...prev.customer, leadStatus } as Customer } : prev
+      )
+    } catch {
+      // error
+    }
+  }
+
+  // Save customer notes (was read-only before).
+  const [notesDraft, setNotesDraft] = useState('')
+  const [isSavingNotes, setIsSavingNotes] = useState(false)
+  // Sync the notes editor when the selected customer changes. This is a
+  // derived-state sync (prop → local state), not a render cascade — disabling
+  // the rule is intentional here.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    setNotesDraft((conversation?.customer as Customer | undefined)?.notes || '')
+  }, [conversation?.customer])
+
+  const handleSaveNotes = async () => {
+    const customerId = (conversation?.customer as Customer | undefined)?.id
+    if (!customerId) return
+    setIsSavingNotes(true)
+    try {
+      await fetch(`/api/customers/${customerId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: notesDraft }),
+      })
+      setConversation((prev) =>
+        prev && prev.customer ? { ...prev, customer: { ...prev.customer, notes: notesDraft } as Customer } : prev
+      )
+    } catch {
+      // error
+    } finally {
+      setIsSavingNotes(false)
+    }
+  }
+
   const customer = conversation?.customer as Customer | undefined
   const channel = conversation?.channel as Record<string, string> | undefined
 
@@ -551,15 +658,29 @@ function ChatWindowPanel() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => updateConversation(conversation.id, { isPinned: !conversation.isPinned })}>
+              <DropdownMenuItem onClick={handleTogglePin}>
                 <Pin className="h-4 w-4 mr-2" /> {conversation.isPinned ? 'Unpin' : 'Pin'}
               </DropdownMenuItem>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <UserCheck className="h-4 w-4 mr-2" /> Assign to
+                </DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent>
+                    {staffList.length === 0 ? (
+                      <DropdownMenuItem disabled>No staff available</DropdownMenuItem>
+                    ) : (
+                      staffList.map((s) => (
+                        <DropdownMenuItem key={s.id} onClick={() => handleAssign(s.id)}>
+                          {s.name} <span className="text-xs text-muted-foreground ml-1 capitalize">({s.role})</span>
+                        </DropdownMenuItem>
+                      ))
+                    )}
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
               <DropdownMenuItem onClick={() => handleStatusChange('closed')}>
                 <Archive className="h-4 w-4 mr-2" /> Close Conversation
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive" onClick={() => handleStatusChange('closed')}>
-                <Trash2 className="h-4 w-4 mr-2" /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -782,7 +903,7 @@ function ChatWindowPanel() {
                 {/* Lead Status */}
                 <div>
                   <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Lead Status</p>
-                  <Select value={customer?.leadStatus || 'new'} onValueChange={() => {}}>
+                  <Select value={customer?.leadStatus || 'new'} onValueChange={handleLeadStatusChange}>
                     <SelectTrigger className="h-8 text-xs">
                       <SelectValue />
                     </SelectTrigger>
@@ -853,8 +974,14 @@ function ChatWindowPanel() {
                   <textarea
                     placeholder="Add notes about this customer..."
                     className="w-full h-20 text-xs border border-border rounded-lg p-2 resize-none bg-background focus:outline-none focus:ring-2 focus:ring-ring/20"
-                    defaultValue={customer?.notes || ''}
+                    value={notesDraft}
+                    onChange={(e) => setNotesDraft(e.target.value)}
                   />
+                  {notesDraft !== (customer?.notes || '') && (
+                    <Button size="sm" className="w-full mt-2 h-7 text-xs bg-slate-900 hover:bg-slate-800" onClick={handleSaveNotes} disabled={isSavingNotes}>
+                      {isSavingNotes ? 'Saving...' : 'Save Notes'}
+                    </Button>
+                  )}
                 </div>
               </div>
             </ScrollArea>
